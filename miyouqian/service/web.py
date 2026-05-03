@@ -1,0 +1,508 @@
+# -*- coding: utf-8 -*-
+"""本地 Web 控制台。"""
+
+from __future__ import annotations
+
+import base64
+import copy
+import io
+import json
+import mimetypes
+import pathlib
+import threading
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+from urllib.parse import unquote, urlparse
+
+import qrcode
+
+from ..auth.login import QRLogin
+from ..core.config import load_config, log_path, normalize_config, save_config, validate_unique_account_uids
+from ..core.http import ApiClient
+from ..core.logs import append_log, configure_logger, format_line, print_startup_banner
+from .notifier import send_push
+from .runner import run_tasks
+from .scheduler import DailyScheduler
+
+WEB_ROOT = pathlib.Path(__file__).resolve().parents[1] / "webui"
+
+
+class WebApp:
+    def __init__(self, config_path: pathlib.Path) -> None:
+        self.config_path = config_path
+        self.config = load_config(config_path)
+        self.log_file = log_path(config_path, self.config)
+        configure_logger(self.log_file)
+        self.lock = threading.RLock()
+        self.logs: list[str] = []
+        self.login_state: dict[str, Any] = {"running": False, "status": "idle"}
+        self.scheduler = DailyScheduler(self.config, self.run_all, lambda message: self.log(message, "scheduler"))
+
+    def start(self) -> None:
+        self.scheduler.start()
+
+    def stop(self) -> None:
+        self.scheduler.stop()
+
+    def log(self, message: str, component: str = "web") -> None:
+        line = format_line(message, component)
+        with self.lock:
+            self.logs.append(line)
+            self.logs = self.logs[-300:]
+            log_file = self.log_file
+        append_log(log_file, line, component=component)
+
+    def run_all(self) -> list[str]:
+        with self.lock:
+            config = self.config
+        try:
+            self.log("任务编排开始", "task")
+            lines = run_tasks(
+                config,
+                str(self.config_path),
+                emit_component=lambda message, component: self.log(message, component),
+            )
+        except Exception as exc:
+            push_result = send_push(config, "米游签任务失败", str(exc), success=False)
+            if push_result:
+                self.log(push_result, "push")
+            raise
+        self.log("任务编排完成，准备发送推送", "task")
+        push_result = send_push(config, "米游签任务完成", "\n".join(lines), success=True)
+        if push_result:
+            self.log(push_result, "push")
+        return []
+
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            logs = list(self.logs[-120:])
+            login_state = dict(self.login_state)
+        return {
+            "scheduler": self.scheduler.status(),
+            "login": login_state,
+            "logs": logs,
+        }
+
+    def get_config(self) -> dict[str, Any]:
+        with self.lock:
+            return json.loads(json.dumps(self.config, ensure_ascii=False))
+
+    def set_config(self, payload: dict[str, Any]) -> None:
+        if not isinstance(payload, dict):
+            raise ValueError("配置必须是 JSON 对象")
+        normalize_config(payload)
+        validate_unique_account_uids(payload)
+        with self.lock:
+            old_config = copy.deepcopy(self.config)
+            preserve_push_channel_secrets(old_config, payload)
+            normalize_config(payload)
+            changes = diff_config(old_config, payload)
+            self.config = payload
+            save_config(self.config_path, self.config)
+            self.log_file = log_path(self.config_path, self.config)
+            configure_logger(self.log_file)
+            self.scheduler.reload(self.config)
+        visible_changes = [change for change in changes if should_log_config_change(*change)]
+        if visible_changes:
+            self.log(f"配置已保存，共 {len(visible_changes)} 项变更", "config")
+            for path, old_value, new_value in visible_changes[:50]:
+                self.log(
+                    f"配置项变更 {path}: {format_config_value(path, old_value)} -> {format_config_value(path, new_value)}",
+                    "config",
+                )
+            if len(visible_changes) > 50:
+                self.log(f"配置项变更过多，已省略 {len(visible_changes) - 50} 项", "config")
+        else:
+            self.log("配置已保存，未检测到配置项变化", "config")
+
+    def start_login(
+        self,
+        account_index: int,
+        timeout: int,
+        account_payload: dict[str, Any] | None = None,
+        draft: bool = False,
+    ) -> None:
+        with self.lock:
+            if self.login_state.get("running"):
+                raise RuntimeError("扫码登录正在进行")
+            accounts = self.config.get("accounts") or []
+            if not draft and (account_index < 0 or account_index >= len(accounts)):
+                raise ValueError("请先添加账号")
+            account_snapshot = dict(account_payload or {})
+            if not draft:
+                account_snapshot = dict(accounts[account_index])
+            account_name = display_account_name(account_snapshot)
+            self.login_state = {
+                "running": True,
+                "status": "starting",
+                "account_index": account_index,
+                "account": account_name,
+                "draft": draft,
+                "message": "正在生成二维码",
+                "qr": "",
+            }
+        thread = threading.Thread(
+            target=self._login_worker,
+            args=(account_index, timeout, account_snapshot, draft),
+            name="miyouqian-web-login",
+            daemon=True,
+        )
+        thread.start()
+        self.log(f"账号 {account_name} 开始扫码登录", "auth")
+
+    def _login_worker(
+        self,
+        account_index: int,
+        timeout: int,
+        account_snapshot: dict[str, Any],
+        draft: bool,
+    ) -> None:
+        try:
+            with self.lock:
+                device = dict(self.config["device"])
+                account_name = display_account_name(account_snapshot)
+            with ApiClient() as client:
+                login = QRLogin(client, str(device["id"]), str(device["fp"]))
+                url, ticket = login.fetch()
+                qr = make_qr_data_uri(url)
+                with self.lock:
+                    self.login_state.update(
+                        {
+                            "status": "waiting",
+                            "message": "等待扫码确认",
+                            "qr": qr,
+                            "qr_url": url,
+                        }
+                    )
+                self.log(f"账号 {account_name} 等待扫码登录", "auth")
+                scan = login.wait(ticket, timeout=timeout)
+                with self.lock:
+                    self.login_state.update({"status": "exchanging", "message": "正在换取凭证"})
+                account_data = login.exchange_tokens(scan["uid"], scan["game_token"])
+            with self.lock:
+                new_uid = str(account_data.get("stuid") or "").strip()
+                duplicate = find_duplicate_uid(self.config.get("accounts") or [], new_uid, None if draft else account_index)
+                if duplicate is not None:
+                    raise ValueError(f"UID {new_uid} 已存在，不能重复添加同一账号")
+                account = {**account_snapshot, **account_data}
+                if not str(account.get("name") or "").strip():
+                    account["name"] = account_data["stuid"]
+                if not draft:
+                    self.config["accounts"][account_index] = account
+                    save_config(self.config_path, self.config)
+                    self.log_file = log_path(self.config_path, self.config)
+                    configure_logger(self.log_file)
+                    self.scheduler.reload(self.config)
+                account_name = display_account_name(account)
+                self.login_state.update(
+                    {
+                        "running": False,
+                        "status": "success",
+                        "message": f"账号 {account_name} 登录成功" + ("，请保存账号" if draft else ""),
+                        "qr": "",
+                        "account_data": account_data,
+                    }
+                )
+            if draft:
+                self.log(f"账号 {account_name} 登录成功，等待保存", "auth")
+            else:
+                self.log(f"账号 {account_name} 登录成功，凭证已保存", "auth")
+        except Exception as exc:
+            with self.lock:
+                self.login_state.update(
+                    {
+                        "running": False,
+                        "status": "error",
+                        "message": str(exc),
+                        "qr": "",
+                    }
+                )
+            self.log(f"扫码登录失败: {exc}", "auth")
+
+
+def make_qr_data_uri(text: str) -> str:
+    image = qrcode.make(text)
+    stream = io.BytesIO()
+    image.save(stream, format="PNG")
+    encoded = base64.b64encode(stream.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def display_account_name(account: dict[str, Any]) -> str:
+    return str(account.get("name") or account.get("stuid") or "未命名账号")
+
+
+def find_duplicate_uid(accounts: list[dict[str, Any]], uid: str, exclude_index: int | None = None) -> int | None:
+    if not uid:
+        return None
+    for index, account in enumerate(accounts):
+        if exclude_index is not None and index == exclude_index:
+            continue
+        if str(account.get("stuid") or "").strip() == uid:
+            return index
+    return None
+
+
+def preserve_push_channel_secrets(old_config: dict[str, Any], new_config: dict[str, Any]) -> None:
+    old_channels = {
+        str(channel.get("provider") or ""): channel
+        for channel in old_config.get("push", {}).get("channels", [])
+        if isinstance(channel, dict)
+    }
+    new_push = new_config.setdefault("push", {})
+    new_channels = new_push.setdefault("channels", [])
+    if not isinstance(new_channels, list):
+        new_push["channels"] = []
+        return
+    seen: set[str] = set()
+    for channel in new_channels:
+        if not isinstance(channel, dict):
+            continue
+        provider = str(channel.get("provider") or "")
+        seen.add(provider)
+        old_channel = old_channels.get(provider)
+        if not old_channel:
+            continue
+        for key, value in old_channel.items():
+            if key not in channel or channel.get(key) in (None, ""):
+                channel[key] = value
+    for provider, old_channel in old_channels.items():
+        if provider and provider not in seen:
+            disabled_channel = dict(old_channel)
+            disabled_channel["enable"] = False
+            new_channels.append(disabled_channel)
+
+
+def diff_config(old: Any, new: Any, path: str = "") -> list[tuple[str, Any, Any]]:
+    if type(old) is not type(new):
+        return [(path or "<root>", old, new)]
+    if isinstance(old, dict):
+        changes: list[tuple[str, Any, Any]] = []
+        keys = sorted(set(old) | set(new), key=str)
+        for key in keys:
+            child_path = f"{path}.{key}" if path else str(key)
+            if key not in old:
+                changes.extend(diff_added_config(new[key], child_path))
+            elif key not in new:
+                changes.extend(diff_removed_config(old[key], child_path))
+            else:
+                changes.extend(diff_config(old[key], new[key], child_path))
+        return changes
+    if isinstance(old, list):
+        changes = []
+        common = min(len(old), len(new))
+        for index in range(common):
+            changes.extend(diff_config(old[index], new[index], f"{path}[{index}]"))
+        for index in range(common, len(old)):
+            changes.extend(diff_removed_config(old[index], f"{path}[{index}]"))
+        for index in range(common, len(new)):
+            changes.extend(diff_added_config(new[index], f"{path}[{index}]"))
+        return changes
+    if old != new:
+        return [(path or "<root>", old, new)]
+    return []
+
+
+def diff_added_config(value: Any, path: str) -> list[tuple[str, Any, Any]]:
+    if isinstance(value, dict):
+        changes: list[tuple[str, Any, Any]] = []
+        for key in sorted(value, key=str):
+            changes.extend(diff_added_config(value[key], f"{path}.{key}"))
+        return changes
+    if isinstance(value, list):
+        changes = []
+        for index, item in enumerate(value):
+            changes.extend(diff_added_config(item, f"{path}[{index}]"))
+        return changes
+    return [(path, None, value)]
+
+
+def diff_removed_config(value: Any, path: str) -> list[tuple[str, Any, Any]]:
+    if isinstance(value, dict):
+        changes: list[tuple[str, Any, Any]] = []
+        for key in sorted(value, key=str):
+            changes.extend(diff_removed_config(value[key], f"{path}.{key}"))
+        return changes
+    if isinstance(value, list):
+        changes = []
+        for index, item in enumerate(value):
+            changes.extend(diff_removed_config(item, f"{path}[{index}]"))
+        return changes
+    return [(path, value, None)]
+
+
+def format_config_value(path: str, value: Any) -> str:
+    if is_sensitive_config_path(path):
+        return mask_sensitive_value(value)
+    text = json.dumps(redact_config_value(value), ensure_ascii=False, sort_keys=True)
+    if len(text) > 120:
+        return text[:117] + "..."
+    return text
+
+
+def redact_config_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: mask_sensitive_value(child) if is_sensitive_config_path(str(key)) else redact_config_value(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_config_value(item) for item in value]
+    return value
+
+
+def mask_sensitive_value(value: Any) -> str:
+    return "<空>" if value in (None, "") else "<已设置>"
+
+
+def should_log_config_change(path: str, old_value: Any, new_value: Any) -> bool:
+    if format_config_value(path, old_value) == format_config_value(path, new_value):
+        return False
+    if old_value is None and new_value in ("", [], {}, None):
+        return False
+    if old_value is None and path.startswith("push.channels[") and path.rsplit(".", 1)[-1] in {"smtp_port", "smtp_ssl"}:
+        return False
+    return True
+
+
+def is_sensitive_config_path(path: str) -> bool:
+    sensitive_names = {
+        "cookie",
+        "stoken",
+        "mid",
+        "token",
+        "webhook",
+        "secret",
+        "password",
+        "smtp_password",
+        "fp",
+    }
+    parts = [part.split("[", 1)[0].lower() for part in path.replace("]", "").split(".")]
+    return any(part in sensitive_names or part.endswith("_token") for part in parts)
+
+
+class Handler(BaseHTTPRequestHandler):
+    app: WebApp
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            if path == "/api/config":
+                self.send_json(self.app.get_config())
+                return
+            if path == "/api/status":
+                self.send_json(self.app.status())
+                return
+            self.serve_static(path)
+        except Exception as exc:
+            self.send_error_json(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            payload = self.read_json()
+            if path == "/api/config":
+                self.app.set_config(payload)
+                self.send_json({"ok": True})
+                return
+            if path == "/api/run":
+                self.app.log("收到手动执行请求", "web")
+                started = self.app.scheduler.run_now()
+                if not started:
+                    self.app.log("手动执行请求被拒绝：任务正在运行", "scheduler")
+                    self.send_error_json("任务正在运行", HTTPStatus.CONFLICT)
+                    return
+                self.send_json({"ok": True})
+                return
+            if path == "/api/login/start":
+                account_index = int(payload.get("account_index", -1))
+                timeout = int(payload.get("timeout") or 120)
+                account_payload = payload.get("account")
+                if account_payload is not None and not isinstance(account_payload, dict):
+                    raise ValueError("账号数据必须是 JSON 对象")
+                self.app.start_login(account_index, timeout, account_payload, bool(payload.get("draft")))
+                self.send_json({"ok": True})
+                return
+            self.send_error_json("接口不存在", HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            self.send_error_json(str(exc), HTTPStatus.BAD_REQUEST)
+
+    def serve_static(self, path: str) -> None:
+        if path == "/":
+            path = "/index.html"
+        relative = pathlib.Path(unquote(path).lstrip("/"))
+        target = (WEB_ROOT / relative).resolve()
+        root = WEB_ROOT.resolve()
+        if root not in target.parents and target != root:
+            self.send_error_json("路径非法", HTTPStatus.FORBIDDEN)
+            return
+        if not target.exists() or not target.is_file():
+            self.send_error_json("文件不存在", HTTPStatus.NOT_FOUND)
+            return
+        content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        data = target.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def read_json(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length") or "0")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length).decode("utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        return data
+
+    def send_json(self, data: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+        raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def send_error_json(self, message: str, status: HTTPStatus) -> None:
+        self.send_json({"ok": False, "error": message}, status=status)
+
+
+def serve(config_path: pathlib.Path, host: str, port: int) -> None:
+    app = WebApp(config_path)
+    Handler.app = app
+    print_startup_banner("MYQ")
+    app.log(f"正在启动 Web 控制台，配置文件: {config_path.resolve()}", "startup")
+    server, actual_port = create_server(host, port)
+    if actual_port != port:
+        app.log(f"端口 {port} 被占用，已切换到 {actual_port}", "startup")
+    app.start()
+    url = f"http://{host}:{actual_port}"
+    app.log(f"Web 控制台已启动: {url}", "web")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        app.log("收到退出信号，正在停止 Web 控制台", "startup")
+    finally:
+        app.stop()
+        server.server_close()
+        app.log("Web 控制台已停止", "startup")
+
+
+def create_server(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
+    last_error: OSError | None = None
+    for candidate in range(port, port + 30):
+        try:
+            return ThreadingHTTPServer((host, candidate), Handler), candidate
+        except OSError as exc:
+            last_error = exc
+            if getattr(exc, "winerror", None) not in (10013, 10048):
+                raise
+    raise OSError(f"端口 {port}-{port + 29} 都无法监听: {last_error}")

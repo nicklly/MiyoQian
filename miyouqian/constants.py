@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+"""接口常量与业务映射。"""
+
+BBS_VERSION = "2.99.1"
+QR_LOGIN_VERSION = "2.102.1"
+
+BBS_SALT = "b0EofkfMKq2saWV9fwux18J5vzcFTlex"
+BBS_WEB_SALT = "DlOUwIupfU6YespEUWDJmXtutuXV6owG"
+BBS_X6_SALT = "t0qEgfub6cvueAPgR5m9aQWWVciEer7v"
+PASSPORT_X4_SALT = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
+PASSPORT_K2_SALT = "OvOIsZRXrUbXoUlpQuhEx4tgAwNVUMmp"
+
+PASSPORT_APP_ID = "bll8iq97cem8"
+QRCODE_APP_ID = "7"
+
+TAKUMI_API = "https://api-takumi.mihoyo.com"
+BBS_API = "https://bbs-api.miyoushe.com"
+PASSPORT_API = "https://passport-api.mihoyo.com"
+ZZZ_ACT_API = "https://act-nap-api.mihoyo.com"
+
+ACCOUNT_ROLES_URL = f"{TAKUMI_API}/binding/api/getUserGameRolesByCookie"
+
+GAME_HOME_URL = f"{TAKUMI_API}/event/luna/home?lang=zh-cn"
+GAME_INFO_URL = f"{TAKUMI_API}/event/luna/info?lang=zh-cn"
+GAME_SIGN_URL = f"{TAKUMI_API}/event/luna/sign"
+
+ZZZ_HOME_URL = f"{ZZZ_ACT_API}/event/luna/zzz/home?lang=zh-cn"
+ZZZ_INFO_URL = f"{ZZZ_ACT_API}/event/luna/zzz/info?lang=zh-cn"
+ZZZ_SIGN_URL = f"{ZZZ_ACT_API}/event/luna/zzz/sign"
+
+BBS_TASKS_URL = f"{BBS_API}/apihub/wapi/getUserMissionsState"
+BBS_SIGN_URL = f"{BBS_API}/apihub/app/api/signIn"
+BBS_POST_LIST_URL = f"{BBS_API}/post/api/getForumPostList"
+BBS_DETAIL_URL = f"{BBS_API}/post/api/getPostFull"
+BBS_SHARE_URL = f"{BBS_API}/apihub/api/getShareConf"
+BBS_LIKE_URL = f"{BBS_API}/apihub/sapi/upvotePost"
+
+QRCODE_FETCH_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/fetch"
+QRCODE_QUERY_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/query"
+TOKEN_BY_GAME_TOKEN_URL = (
+    f"{TAKUMI_API}/account/ma-cn-session/app/getTokenByGameToken"
+)
+LTOKEN_BY_STOKEN_URL = f"{PASSPORT_API}/account/auth/api/getLTokenBySToken"
+COOKIE_TOKEN_BY_STOKEN_URL = (
+    f"{PASSPORT_API}/account/auth/api/getCookieAccountInfoBySToken"
+)
+COOKIE_TOKEN_REFRESH_URL = f"{TAKUMI_API}/auth/api/getCookieAccountInfoBySToken"
+
+DEFAULT_MOBILE_UA = (
+    "Mozilla/5.0 (Linux; Android 12; Unspecified Device) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
+    f"Chrome/103.0.5060.129 Mobile Safari/537.36 miHoYoBBS/{BBS_VERSION}"
+)
+
+QR_MOBILE_UA = (
+    f"Mozilla/5.0 (Linux; Android 12) Mobile miHoYoBBS/{QR_LOGIN_VERSION}"
+)
+
+GAMES = {
+    "genshin": {
+        "name": "原神",
+        "role": "旅行者",
+        "game_biz": "hk4e_cn",
+        "act_id": "e202311201442471",
+        "home_url": GAME_HOME_URL,
+        "info_url": GAME_INFO_URL,
+        "sign_url": GAME_SIGN_URL,
+        "extra_headers": {"x-rpc-signgame": "hk4e"},
+    },
+    "starrail": {
+        "name": "崩坏：星穹铁道",
+        "role": "开拓者",
+        "game_biz": "hkrpg_cn",
+        "act_id": "e202304121516551",
+        "home_url": GAME_HOME_URL,
+        "info_url": GAME_INFO_URL,
+        "sign_url": GAME_SIGN_URL,
+        "extra_headers": {},
+    },
+    "zzz": {
+        "name": "绝区零",
+        "role": "绳匠",
+        "game_biz": "nap_cn",
+        "act_id": "e202406242138391",
+        "home_url": ZZZ_HOME_URL,
+        "info_url": ZZZ_INFO_URL,
+        "sign_url": ZZZ_SIGN_URL,
+        "extra_headers": {"x-rpc-signgame": "zzz"},
+    },
+    "honkai3rd": {
+        "name": "崩坏3",
+        "role": "舰长",
+        "game_biz": "bh3_cn",
+        "act_id": "e202306201626331",
+        "home_url": GAME_HOME_URL,
+        "info_url": GAME_INFO_URL,
+        "sign_url": GAME_SIGN_URL,
+        "extra_headers": {},
+    },
+    "tears": {
+        "name": "未定事件簿",
+        "role": "律师",
+        "game_biz": "nxx_cn",
+        "act_id": "e202202251749321",
+        "home_url": GAME_HOME_URL,
+        "info_url": GAME_INFO_URL,
+        "sign_url": GAME_SIGN_URL,
+        "extra_headers": {},
+    },
+    "honkai2": {
+        "name": "崩坏学园2",
+        "role": "玩家",
+        "game_biz": "bh2_cn",
+        "act_id": "e202203291431091",
+        "home_url": GAME_HOME_URL,
+        "info_url": GAME_INFO_URL,
+        "sign_url": GAME_SIGN_URL,
+        "extra_headers": {},
+    },
+}
+
+BBS_FORUMS = {
+    1: {"id": "1", "forum_id": "1", "name": "崩坏3"},
+    2: {"id": "2", "forum_id": "26", "name": "原神"},
+    3: {"id": "3", "forum_id": "30", "name": "崩坏2"},
+    4: {"id": "4", "forum_id": "37", "name": "未定事件簿"},
+    5: {"id": "5", "forum_id": "34", "name": "大别野"},
+    6: {"id": "6", "forum_id": "52", "name": "崩坏：星穹铁道"},
+    8: {"id": "8", "forum_id": "57", "name": "绝区零"},
+}

@@ -1,0 +1,605 @@
+<h1>米游签</h1>
+
+<div align="center">
+  <h1 align="center">
+    <img src="./miyouqian/webui/assets/myq_logo.png" width="200" alt="米游签" style="border-radius:10px">
+  </h1>
+  <p>一个小而美的带 Web 控制台的米游社签到工具，支持扫码登录、游戏签到、米游币任务、每日自动执行和结果推送。</p>
+  <p>
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&style=flat-square">
+    <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-1E9BFA?style=flat-square">
+    <img alt="Encoding" src="https://img.shields.io/badge/encoding-UTF--8-2EA44F?style=flat-square">
+  </p>
+</div>
+
+## 简介
+
+米游签是一款小而美，精致便捷的米游社每日签到工具。你只需要用米游社 APP 扫码登录一次，之后就可以在本地 Web 控制台里管理账号、选择任务、设置每天自动执行签到任务。
+
+<img src="./assets/home.png" alt="demo" style="max-width:100%;border-radius:10px">
+
+### 请勿在其他平台宣传本项目，请不要大范围传播本项目！！！
+
+### 大怨种是谁呢
+
+太久没有玩米游了，回坑就做这个项目，要做完突然发现天塌了，米游社要更新米游币获取规则了，部分用户现在已经不能回帖点赞获取米游币了，不知道官方后续的新规是什么，赶上了好时候，卑微QWQ，不知道以后新的规则还能不能搞自动任务
+
+## 功能
+
+- 米游社 APP 扫码登录
+- 多账号管理
+- 游戏每日签到
+- 米游币社区任务
+- 本地 Web 控制台
+- 每日自动执行
+- 执行结果推送
+- 日志查看
+
+## 支持的游戏
+
+| 游戏 | 配置名 |
+| --- | --- |
+| 原神 | `genshin` |
+| 崩坏：星穹铁道 | `starrail` |
+| 绝区零 | `zzz` |
+| 崩坏3 | `honkai3rd` |
+| 未定事件簿 | `tears` |
+| 崩坏学园2 | `honkai2` |
+
+默认启用原神、崩坏：星穹铁道、绝区零。其他游戏可以在 Web 控制台或配置文件中开启。
+
+## 米游币任务
+
+米游币任务默认关闭，需要时手动开启。可执行的任务包括：
+
+- 社区签到
+- 看帖
+- 点赞
+- 分享
+- 点赞后自动取消点赞
+
+米游币任务比游戏签到更容易遇到验证码或风控。第一次使用建议先只开启游戏签到，确认稳定后再开启米游币任务。
+
+## 部署流程
+
+下面以本地部署为例。项目推荐使用 `uv` 管理 Python 环境和依赖。Windows 用户可以直接使用 PowerShell；Linux 或 macOS 用户把对应命令换成下方给出的 shell 命令即可。
+
+### 1. 安装 uv
+
+Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Linux 或 macOS：
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+安装完成后，重新打开一个终端，检查 uv 是否可用：
+
+```powershell
+uv --version
+```
+
+看到版本号后再继续下一步。uv 会为项目创建虚拟环境，也可以在需要时自动准备 Python 版本。
+
+### 2. 获取项目文件
+
+如果你下载的是压缩包，请先解压，然后进入解压后的项目目录。
+
+如果你使用 Git，可以执行：
+
+```powershell
+git clone <你的仓库地址>
+cd 米游社签到
+```
+
+后续所有命令都需要在项目目录中执行，也就是能看到 `main.py`、`pyproject.toml` 和 `uv.lock` 的目录。
+
+### 3. 创建虚拟环境并安装依赖
+
+在项目目录执行：
+
+```powershell
+uv venv --python 3.11
+uv sync
+```
+
+这会在项目目录下创建 `.venv`，并安装项目运行所需依赖。日常使用时不需要手动激活虚拟环境，后续命令直接通过 `uv run` 执行即可。
+
+如果下载依赖很慢，可以临时使用镜像源：
+
+```powershell
+uv sync --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+### 4. 启动 Web 控制台
+
+```powershell
+uv run python main.py
+```
+
+启动成功后，终端会显示访问地址，通常是：
+
+```text
+http://127.0.0.1:5890
+```
+
+如果端口被占用，程序会自动切换到后续端口。请以终端显示的实际地址为准。
+
+### 5. 完成首次配置
+
+打开 Web 控制台后，按顺序完成：
+
+1. 添加账号
+2. 使用米游社 APP 扫码登录
+3. 选择要执行的游戏签到任务
+4. 点击“立即执行”测试一次
+5. 测试正常后再开启每日调度和推送
+
+### 6. 保持程序运行
+
+每日自动执行依赖当前程序保持运行。关闭终端、电脑关机或休眠后，自动任务不会继续执行。
+
+## 快速开始
+
+推荐使用 Web 控制台完成所有日常操作。
+
+### 1. 启动
+
+在项目目录运行：
+
+```powershell
+uv run python main.py
+```
+
+启动成功后，终端会显示 Web 控制台地址，通常是：
+
+```text
+http://127.0.0.1:5890
+```
+
+如果 `5890` 端口被占用，程序会自动尝试后续端口。请以终端里显示的实际地址为准。
+
+### 2. 添加账号
+
+打开 Web 控制台后：
+
+1. 在“账号”区域点击“添加”
+2. 可以先把账号名改成 `main`、`小号1` 等方便识别的名字
+3. 点击账号卡片里的“登录”
+4. 使用米游社 APP 扫码
+
+扫码路径：
+
+```text
+米游社 APP -> 我的 -> 右上角扫一扫
+```
+
+登录成功后，账号卡片会显示 UID。
+
+### 3. 选择任务
+
+在“任务配置”里选择你想执行的内容：
+
+- 游戏每日签到
+- 具体游戏
+- 米游币任务
+- 社区签到、看帖、点赞、分享
+
+第一次使用建议只开启“游戏每日签到”，先跑通一次。
+
+### 4. 手动测试
+
+点击右上角“立即执行”。执行过程中可以在右侧日志区域查看结果。
+
+如果提示“今日已签到”，说明账号和任务配置已经正常。
+
+### 5. 开启每日自动执行
+
+确认手动执行正常后，再展开“每日调度”：
+
+1. 勾选“启用每日自动执行”
+2. 设置执行时间
+3. 设置随机波动分钟
+4. 按需选择“启动后执行一次”
+
+示例：执行时间为 `09:00`，随机波动为 `45`，表示每天 09:00 到 09:45 之间随机执行一次。
+
+自动执行要求程序保持运行。关闭终端、电脑关机或休眠后，任务不会继续执行，所以推荐服务器上运行。
+
+## Web 控制台说明
+
+Web 控制台主要分为几块：
+
+| 区域 | 用途 |
+| --- | --- |
+| 顶部状态 | 查看账号数量、自动调度状态、下次执行时间、最近结果 |
+| 账号 | 添加账号、扫码登录、刷新凭证、删除账号 |
+| 任务配置 | 开关游戏签到和米游币任务 |
+| 每日调度 | 设置每天什么时候自动运行 |
+| 推送通道 | 设置任务完成后的通知方式 |
+| 日志 | 查看本次启动后的运行记录 |
+
+日志区域只显示本次 Web 服务启动后的记录。历史日志会保存在 `logs/miyouqian.log`。
+
+## 命令行用法
+
+如果你不想使用 Web 控制台，也可以用命令行。
+
+生成配置：
+
+```powershell
+uv run python main.py init
+```
+
+扫码登录：
+
+```powershell
+uv run python main.py login --account main
+```
+
+执行全部任务：
+
+```powershell
+uv run python main.py run
+```
+
+只执行指定账号：
+
+```powershell
+uv run python main.py run --account main
+```
+
+只执行游戏签到：
+
+```powershell
+uv run python main.py run --games-only
+```
+
+只执行米游币任务：
+
+```powershell
+uv run python main.py run --bbs-only
+```
+
+只执行指定游戏：
+
+```powershell
+uv run python main.py run --game genshin --game starrail
+```
+
+启动 Web 控制台并指定端口：
+
+```powershell
+uv run python main.py serve --port 5891
+```
+
+查看当前配置摘要：
+
+```powershell
+uv run python main.py show
+```
+
+## 常用设置
+
+大多数设置都可以在 Web 控制台里完成。只有在需要批量修改、迁移配置或高级调整时，才建议手动编辑 `config.yaml`。
+
+请使用 UTF-8 编码保存配置文件，否则中文可能乱码。
+
+### 文件位置
+
+默认会生成或使用这些文件：
+
+```text
+config.yaml              # 账号名称、任务开关、调度、推送等普通配置
+data/credentials.yaml    # 登录凭证
+logs/miyouqian.log       # 历史日志
+qrcode.png               # 命令行扫码登录时生成的二维码图片
+```
+
+开发时不要把这些文件上传到公开仓库，尤其是 `data/credentials.yaml`。
+
+### 账号
+
+Web 控制台添加账号后，会在配置中保存账号名。扫码登录成功后，登录凭证会单独保存到 `data/credentials.yaml`。
+
+通常不需要手动填写 cookie 或 stoken。
+
+### 游戏签到
+
+如果你想手动指定游戏，可以编辑：
+
+```yaml
+games:
+  enabled:
+    - genshin
+    - starrail
+    - zzz
+```
+
+如果某个游戏里有多个角色，但你想跳过其中一个角色，可以把角色 UID 加到黑名单：
+
+```yaml
+games:
+  black_list:
+    genshin:
+      - "100000001"
+```
+
+### 米游币任务
+
+开启米游币任务：
+
+```yaml
+features:
+  bbs_tasks: true
+```
+
+常用选项：
+
+```yaml
+bbs:
+  forums:
+    - 5
+    - 2
+  checkin: true
+  read: true
+  like: true
+  share: true
+  cancel_like: true
+  delay_seconds:
+    - 1
+    - 3
+```
+
+社区 ID：
+
+| ID | 社区 |
+| --- | --- |
+| `1` | 崩坏3 |
+| `2` | 原神 |
+| `3` | 崩坏2 |
+| `4` | 未定事件簿 |
+| `5` | 大别野 |
+| `6` | 崩坏：星穹铁道 |
+| `8` | 绝区零 |
+
+### 每日调度
+
+```yaml
+schedule:
+  enable: true
+  time: "09:00"
+  jitter_minutes: 45
+  run_on_start: false
+```
+
+含义：
+
+| 设置 | 说明 |
+| --- | --- |
+| `enable` | 是否开启每日自动执行 |
+| `time` | 每天的基准执行时间 |
+| `jitter_minutes` | 随机延后分钟数 |
+| `run_on_start` | 启动 Web 服务后是否立即执行一次 |
+
+## 推送设置
+
+推送可以在 Web 控制台中配置。开启后，任务结束时会发送结果通知。
+
+如果只想失败时通知，勾选“仅失败时推送”，或设置：
+
+```yaml
+push:
+  error_only: true
+```
+
+### pushplus
+
+需要填写：
+
+- Token
+- 群组编码，可留空
+
+示例：
+
+```yaml
+push:
+  channels:
+    - provider: pushplus
+      enable: true
+      token: "你的 token"
+      topic: ""
+```
+
+### Telegram
+
+需要填写：
+
+- Bot Token
+- Chat ID
+
+示例：
+
+```yaml
+push:
+  channels:
+    - provider: telegram
+      enable: true
+      token: "bot token"
+      chat_id: "chat id"
+```
+
+### 钉钉机器人
+
+需要填写：
+
+- Webhook
+- 加签 Secret，可留空
+
+示例：
+
+```yaml
+push:
+  channels:
+    - provider: dingrobot
+      enable: true
+      webhook: "https://oapi.dingtalk.com/robot/send?access_token=..."
+      secret: "SEC..."
+```
+
+### 飞书机器人
+
+需要填写：
+
+- Webhook
+
+示例：
+
+```yaml
+push:
+  channels:
+    - provider: feishubot
+      enable: true
+      webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/..."
+```
+
+### 邮箱
+
+需要填写：
+
+- SMTP 服务器
+- SMTP 端口
+- 邮箱账号
+- 邮箱授权码
+- 发件人
+- 收件人
+
+示例：
+
+```yaml
+push:
+  channels:
+    - provider: email
+      enable: true
+      smtp_host: "smtp.example.com"
+      smtp_port: 465
+      smtp_user: "name@example.com"
+      smtp_password: "邮箱授权码"
+      mail_from: "name@example.com"
+      mail_to: "target@example.com"
+      smtp_ssl: true
+```
+
+多个收件人通常可以用英文逗号分隔。
+
+## 推荐使用流程
+
+第一次使用建议这样做：
+
+1. 安装 uv
+2. 创建虚拟环境并安装依赖
+3. 运行 `uv run python main.py`
+4. 打开 Web 控制台
+5. 添加账号并扫码登录
+6. 只开启游戏签到
+7. 点击“立即执行”
+8. 确认日志正常
+9. 开启每日调度
+10. 按需开启推送
+11. 最后再考虑开启米游币任务
+
+## FAQ
+
+### 扫码登录后凭证保存在哪里？
+
+默认保存在 `data/credentials.yaml`。普通设置保存在 `config.yaml`。
+
+### 为什么 `config.yaml` 里看不到 cookie？
+
+登录凭证会单独保存，避免普通配置文件里直接暴露敏感信息。
+
+### Web 控制台打不开怎么办？
+
+先看终端里显示的实际地址。默认端口是 `5890`，如果被占用，程序会自动切换到后续端口。
+
+也可以手动指定端口：
+
+```powershell
+uv run python main.py serve --port 5891
+```
+
+### 自动调度没有执行？
+
+请检查：
+
+- 程序是否一直运行
+- “每日调度”是否已开启
+- 电脑是否休眠或关机
+- 当前时间是否已经过了今天的执行窗口
+- 日志里是否显示了下次执行时间
+
+### 签到提示首次绑定怎么办？
+
+部分游戏第一次绑定签到活动时，需要先在米游社或活动页面手动签到一次。手动完成后，后续再交给米游签执行。
+
+### 遇到验证码怎么办？
+
+程序不会自动处理验证码。遇到验证码时会跳过该项并写入日志。可以稍后手动签到，或降低米游币任务使用频率。
+
+### 米游币任务失败，但游戏签到正常？
+
+这是可能的。米游币任务更容易受到验证码、风控和任务状态影响。建议先确保游戏签到稳定，再开启米游币任务。
+
+### 可以添加多个账号吗？
+
+可以。每个账号都需要分别扫码登录。不要重复添加同一个 UID。
+
+### 可以放到服务器运行吗？
+
+本项目推荐放到服务器运行，但要注意：
+
+- 扫码登录时需要能看到二维码
+- 不建议把 Web 控制台直接暴露到公网
+- 如果使用 `--host 0.0.0.0`，请自行做好访问限制
+- 服务器时间会影响每日调度时间
+
+## 下一步计划
+
+| 完成 | 计划 | 完成时间 |
+| --- | --- | --- |
+| [ ] | 补充更多游戏渠道签到 | -- |
+| [ ] | 新增米游社其他功能，例如米游币兑换功能 | -- |
+| [ ] | 补充更多推送渠道 | -- |
+| [ ] | 优化签到流程，降低风控风险 | -- |
+| [ ] | 增加配置导入、导出功能 | -- |
+| [ ] | 完善产品文档 | -- |
+| [ ] | 持续适配米游社规则变化，尽量保持工具可用 | -- |
+| [ ] | ... | -- |
+
+## 注意事项
+
+- 请妥善保管 `data/credentials.yaml`
+- 不要公开上传配置文件、日志文件或二维码图片
+- 遇到验证码时需要手动处理
+- 如果米游社规则变化，可能会出现签到失败，需要等待项目更新
+- 使用自动化工具存在账号风控风险，请低频、保守使用
+
+## 致谢
+
+本项目的部分功能思路参考：
+
+- [Womsxd/MihoyoBBSTools](https://github.com/Womsxd/MihoyoBBSTools)
+- [jiarui666/mihoyo_qr_login](https://github.com/jiarui666/mihoyo_qr_login)
+
+## 免责声明
+
+本项目仅供学习和个人使用，请勿用于商业用途或违反米哈游、米游社相关用户协议的场景。
+
+使用本项目产生的账号风险、数据丢失、任务失败、风控限制或其他后果均由使用者自行承担。请妥善保管账号凭证，不要将配置文件、日志文件或二维码图片公开分享。
+
+如果你不同意以上内容，请不要使用本项目。

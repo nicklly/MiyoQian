@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+config.yaml
+qrcode.png
+*.log
+data/
+logs/

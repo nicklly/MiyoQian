@@ -1,0 +1,72 @@
+# -*- coding: utf-8 -*-
+# 米游签配置文件。复制为 config.yaml 后填写或用 `python main.py login` 扫码写入。
+
+enable: true
+
+accounts:
+  []
+
+storage:
+  data_dir: data
+  credentials_file: credentials.yaml
+  log_dir: logs
+  log_file: miyouqian.log
+
+device:
+  id: ""
+  fp: ""
+  name: ""
+  model: ""
+  presets:
+    - name: "Xiaomi 14"
+      model: "23127PN0CC"
+    - name: "Xiaomi 13"
+      model: "2211133C"
+    - name: "Redmi K70"
+      model: "2311DRK48C"
+    - name: "OnePlus 12"
+      model: "PJD110"
+    - name: "vivo X100"
+      model: "V2309A"
+
+features:
+  game_checkin: true
+  bbs_tasks: false
+
+schedule:
+  enable: false
+  time: "09:00"
+  jitter_minutes: 45
+  run_on_start: false
+
+games:
+  enabled:
+    - genshin
+    - starrail
+    - zzz
+  black_list:
+    genshin: []
+    starrail: []
+    zzz: []
+
+bbs:
+  forums:
+    - 5
+    - 2
+  checkin: true
+  read: true
+  like: true
+  share: true
+  cancel_like: true
+  post_limit: 5
+  delay_seconds:
+    - 1
+    - 3
+
+push:
+  error_only: false
+  channels:
+    - provider: pushplus
+      enable: false
+      token: ""
+      topic: ""
