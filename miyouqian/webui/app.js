@@ -16,7 +16,7 @@ const pushChannelOptions = [
 ];
 
 const captchaChannelOptions = [
-  ["damagou", "打码狗(成本0.01元/次)"],
+  ["damagou", "打码狗(成本≈0.01元/次)"],
 ];
 
 let config = null;
