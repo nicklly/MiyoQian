@@ -27,7 +27,7 @@
 ### 交流群
 如果你有兴趣参与开发，或者在使用过程中遇到问题，可以加入交流群：
 
-<img src="./assets/QQ_qrcode.jpg" alt="QQ群" style="max-width:100%;border-radius:10px">
+<img src="./assets/QQ_qrcode.jpg" alt="QQ群" width="300">
 
 ## 功能
 
