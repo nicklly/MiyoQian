@@ -152,7 +152,8 @@ docker compose up -d --build
 
 点击本仓库右上角的 `Fork`，把项目复制到你自己的 GitHub 账号下。
 
-进入你自己的 Fork 仓库后，打开 `Actions` 页面。如果页面提示 workflow 被禁用，点击启用。不要在原项目仓库里配置你的账号凭证，也不要把凭证发给项目作者。
+进入你自己的 Fork 仓库后，打开 `Actions` 页面。如果页面提示 workflow 被禁用，点击启用。开启Actions后无论配置secrets与否都会每天执行一次
+不要在原项目仓库里配置你的账号凭证，也不要把凭证发给项目作者。
 
 #### 3. 添加 GitHub Secrets
 
