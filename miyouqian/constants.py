@@ -121,6 +121,27 @@ GAMES = {
     },
 }
 
+CLOUD_GAMES = {
+    "genshin": {
+        "name": "云原神",
+        "coin_name": "米云币",
+        "sign_url": "https://api-cloudgame.mihoyo.com/hk4e_cg_cn/wallet/wallet/get",
+        "host": "api-cloudgame.mihoyo.com",
+        "referer": "https://app.mihoyo.com",
+    },
+    "zzz": {
+        "name": "云绝区零",
+        "coin_name": "邦邦点",
+        "sign_url": "https://cg-nap-api.mihoyo.com/nap_cn/cg/wallet/wallet/get",
+        "host": "cg-nap-api.mihoyo.com",
+        "referer": "",
+    },
+}
+
+CLOUD_GAME_DISABLED_REASONS = {
+    "starrail": "云星穹铁道是版本更新赠送 600 分钟，不需要每日签到获取时长",
+}
+
 BBS_FORUMS = {
     1: {"id": "1", "forum_id": "1", "name": "崩坏3"},
     2: {"id": "2", "forum_id": "26", "name": "原神"},

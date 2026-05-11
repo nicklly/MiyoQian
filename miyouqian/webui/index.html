@@ -31,6 +31,9 @@
         <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"></path>
         <path d="M14 14h2v2h-2zM18 14h2v4h-2zM14 18h4v2h-4z"></path>
       </symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24">
+        <path d="M17.5 19H8a5 5 0 1 1 1.1-9.9A6.5 6.5 0 0 1 21 12.8 3.6 3.6 0 0 1 17.5 19Z"></path>
+      </symbol>
       <symbol id="i-edit" viewBox="0 0 24 24">
         <path d="M12 20h9"></path>
         <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
@@ -105,16 +108,23 @@
             <summary>
               <span>
                 <strong>任务配置</strong>
-                <small>游戏签到与米游币任务</small>
+                <small>游戏社区、云游戏与米游币任务</small>
               </span>
               <span class="disclosure" aria-hidden="true"></span>
             </summary>
             <div class="task-group" id="gameTaskGroup">
               <label class="check-row task-switch">
                 <input id="gameCheckin" type="checkbox" data-autosave />
-                <span>游戏每日签到</span>
+                <span>游戏社区签到</span>
               </label>
               <div class="chips" id="gameChips"></div>
+            </div>
+            <div class="task-group" id="cloudGameTaskGroup">
+              <label class="check-row task-switch">
+                <input id="cloudGameCheckin" type="checkbox" data-autosave />
+                <span>云游戏签到</span>
+              </label>
+              <div class="chips" id="cloudGameChips"></div>
             </div>
             <div class="task-group" id="bbsTaskGroup">
               <label class="check-row task-switch">

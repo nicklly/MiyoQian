@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="执行签到任务")
     run_parser.add_argument("--account", help="只执行指定账号，默认执行全部账号")
-    run_parser.add_argument("--games-only", action="store_true", help="只执行游戏签到")
+    run_parser.add_argument("--games-only", action="store_true", help="只执行游戏社区签到和云游戏签到")
     run_parser.add_argument("--bbs-only", action="store_true", help="只执行米游币社区任务")
     run_parser.add_argument("--game", action="append", help="只执行指定游戏，可重复传入")
 
@@ -146,10 +146,24 @@ def command_show(config_path: pathlib.Path) -> int:
     config = load_config(config_path)
     accounts = ", ".join(str(item.get("name", "未命名")) for item in config.get("accounts", []))
     games = ", ".join(config.get("games", {}).get("enabled", []))
+    cloud_games = ", ".join(config.get("cloud_games", {}).get("enabled", []))
+    enabled_cloud_games = set(config.get("cloud_games", {}).get("enabled", []))
+    cloud_account_count = sum(
+        1
+        for account in config.get("accounts", [])
+        if any(
+            str(((account.get("cloud_games") or {}).get("tokens") or {}).get(key) or "").strip()
+            for key in enabled_cloud_games
+        )
+    )
     print(f"配置文件: {config_path.resolve()}")
     print(f"总开关: {config.get('enable', True)}")
     print(f"账号: {accounts}")
-    print(f"游戏签到: {config.get('features', {}).get('game_checkin', True)} ({games})")
+    print(f"游戏社区签到: {config.get('features', {}).get('game_checkin', True)} ({games})")
+    print(
+        f"云游戏签到: {config.get('features', {}).get('cloud_game_checkin', False)} "
+        f"({cloud_games or '未选择'}; 已配置 {cloud_account_count} 个账号)"
+    )
     print(f"米游币社区任务: {config.get('features', {}).get('bbs_tasks', False)}")
     schedule = config.get("schedule", {})
     print(

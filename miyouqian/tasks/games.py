@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""国内游戏每日签到。"""
+"""国内游戏社区签到。"""
 
 from __future__ import annotations
 
@@ -47,11 +47,11 @@ class GameCheckin:
             failed.extend(result["failed"])
             skipped.extend(result["skipped"])
             sleep_by_config(self.config)
-        self._add(messages, f"游戏签到汇总：成功 {len(success)}，失败 {len(failed)}，跳过 {len(skipped)}")
+        self._add(messages, f"游戏社区签到汇总：成功 {len(success)}，失败 {len(failed)}，跳过 {len(skipped)}")
         if success:
-            self._add(messages, f"游戏成功项：{'; '.join(success)}")
+            self._add(messages, f"游戏社区成功项：{'; '.join(success)}")
         if failed:
-            self._add(messages, f"游戏失败项：{'; '.join(failed)}")
+            self._add(messages, f"游戏社区失败项：{'; '.join(failed)}")
         return messages
 
     def _run_game(self, game_key: str, game: dict[str, Any]) -> dict[str, list[str]]:
@@ -227,10 +227,10 @@ class GameCheckin:
         if not captcha.is_enabled(self.config):
             return None
         provider = captcha.active_provider_label(self.config)
-        self._add(messages, f"游戏签到触发验证码，正在调用{provider}识别({attempt}/{max_retries})")
+        self._add(messages, f"游戏社区签到触发验证码，正在调用{provider}识别({attempt}/{max_retries})")
         solution = captcha.solve_game_captcha(self.client, self.config, gt, challenge, self.emit)
         if not solution:
-            self._add(messages, "游戏签到验证码识别失败，准备重新获取验证码")
+            self._add(messages, "游戏社区签到验证码识别失败，准备重新获取验证码")
         return solution
 
     def _retry_captcha_sign(
@@ -250,14 +250,14 @@ class GameCheckin:
             if not solution:
                 current = self._sign(game, role)
                 continue
-            self._add(messages, "游戏签到验证码已处理，正在重试签到")
+            self._add(messages, "游戏社区签到验证码已处理，正在重试签到")
             current = self._sign(game, role, solution)
             if current.get("retcode") == -5003:
                 return current
             if current.get("retcode") == 0 and (current.get("data") or {}).get("success") != 1:
                 return current
             if attempt < max_retries:
-                self._add(messages, "游戏签到验证码提交失败，准备重新获取验证码")
+                self._add(messages, "游戏社区签到验证码提交失败，准备重新获取验证码")
                 current = self._sign(game, role)
         return current
 

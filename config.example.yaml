@@ -5,6 +5,14 @@ enable: true
 
 accounts:
   []
+# 每个账号可单独配置云游戏签到，例如：
+# - name: "main"
+#   cloud_games:
+#     tokens:
+#       genshin: ""  # 云原神 x-rpc-combo_token
+#       zzz: ""      # 云绝区零 x-rpc-combo_token
+#   # 获取方式：登录云游戏网页版，开发者工具 Network 过滤 wallet/wallet/get，
+#   # 复制成功请求头里的 X-Rpc-Combo_token。
 
 storage:
   data_dir: data
@@ -31,6 +39,7 @@ device:
 
 features:
   game_checkin: true
+  cloud_game_checkin: false
   bbs_tasks: false
 
 captcha:
@@ -62,6 +71,11 @@ games:
     genshin: []
     starrail: []
     zzz: []
+
+cloud_games:
+  enabled:
+    - genshin
+    - zzz
 
 bbs:
   forums:

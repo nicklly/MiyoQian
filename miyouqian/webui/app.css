@@ -184,6 +184,12 @@ button:disabled {
   background: var(--panel);
 }
 
+.ghost.is-active {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+
 .status-grid,
 .app-layout {
   display: grid;
@@ -496,6 +502,21 @@ textarea:focus {
   accent-color: var(--primary);
 }
 
+.chip.disabled {
+  color: var(--muted);
+  background: #f7fafc;
+  border-style: dashed;
+  cursor: help;
+}
+
+.chip.disabled span {
+  color: var(--muted);
+}
+
+.chip.disabled input {
+  cursor: not-allowed;
+}
+
 .account-row {
   display: grid;
   gap: 12px;
@@ -569,6 +590,66 @@ textarea:focus {
 
 .status-dot.ok {
   background: var(--ok);
+}
+
+.account-cloud {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.account-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.account-subhead strong {
+  font-size: 14px;
+}
+
+.account-subhead small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cloud-token-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cloud-token-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.cloud-token-row span {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.cloud-token-row.disabled span {
+  color: var(--muted);
+}
+
+.cloud-token-row.disabled input {
+  border-style: dashed;
+  color: var(--muted);
+  background: #f7fafc;
+  cursor: help;
+}
+
+.account-cloud.is-disabled .cloud-token-list {
+  opacity: 0.48;
+}
+
+.account-cloud.is-disabled input {
+  cursor: not-allowed;
 }
 
 .icon-only {
@@ -734,6 +815,10 @@ textarea:focus {
     flex-wrap: wrap;
   }
 
+  .cloud-token-row {
+    grid-template-columns: 1fr;
+  }
+
   .side-column {
     position: static;
     max-height: none;
@@ -778,7 +863,7 @@ textarea:focus {
 
   .account-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
   }

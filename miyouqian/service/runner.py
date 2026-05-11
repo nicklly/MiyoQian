@@ -8,6 +8,7 @@ from typing import Any, Callable
 from ..core.config import find_account, save_config
 from ..core.http import ApiClient
 from ..tasks.bbs import BbsTasks
+from ..tasks.cloud_games import CloudGameCheckin
 from ..tasks.games import GameCheckin
 
 EmitFn = Callable[[str], None]
@@ -53,6 +54,15 @@ def run_tasks(
                     account,
                     emit=(lambda message: add(message, "game")) if should_emit else None,
                 ).run(only_games=only_games)
+                if not should_emit:
+                    output.extend(lines)
+            if not bbs_only and config.get("features", {}).get("cloud_game_checkin", False):
+                lines = CloudGameCheckin(
+                    client,
+                    config,
+                    account,
+                    emit=(lambda message: add(message, "cloud")) if should_emit else None,
+                ).run()
                 if not should_emit:
                     output.extend(lines)
             if not games_only and config.get("features", {}).get("bbs_tasks", False):

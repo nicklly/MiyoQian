@@ -13,6 +13,7 @@ import yaml
 from . import crypto
 
 SENSITIVE_ACCOUNT_FIELDS = ("cookie", "stuid", "stoken", "mid")
+SUPPORTED_CLOUD_GAME_KEYS = ("genshin", "zzz")
 
 DEFAULT_DEVICE_PRESETS: list[dict[str, str]] = [
     {"name": "Xiaomi 14", "model": "23127PN0CC"},
@@ -37,7 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "log_file": "miyouqian.log",
     },
     "device": {"id": "", "fp": "", "name": "", "model": "", "presets": DEFAULT_DEVICE_PRESETS},
-    "features": {"game_checkin": True, "bbs_tasks": False},
+    "features": {"game_checkin": True, "cloud_game_checkin": False, "bbs_tasks": False},
     "captcha": {
         "enable": False,
         "max_retries": 3,
@@ -47,6 +48,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "games": {
         "enabled": ["genshin", "starrail", "zzz"],
         "black_list": {"genshin": [], "starrail": [], "zzz": []},
+    },
+    "cloud_games": {
+        "enabled": ["genshin", "zzz"],
     },
     "bbs": {
         "forums": [5, 2],
@@ -84,6 +88,7 @@ def load_config(path: str | pathlib.Path) -> dict[str, Any]:
     config = merge_dict(copy.deepcopy(DEFAULT_CONFIG), loaded)
     normalize_config(config)
     merge_credentials(config, load_credentials(config_path, config))
+    normalize_config(config)
     return config
 
 
@@ -121,6 +126,11 @@ def normalize_config(config: dict[str, Any]) -> None:
     storage.setdefault("credentials_file", "credentials.yaml")
     storage.setdefault("log_dir", "logs")
     storage.setdefault("log_file", "miyouqian.log")
+    cloud_games = config.setdefault("cloud_games", {})
+    if not isinstance(cloud_games, dict):
+        cloud_games = {}
+        config["cloud_games"] = cloud_games
+    cloud_games["enabled"] = normalize_cloud_game_enabled(cloud_games.get("enabled", SUPPORTED_CLOUD_GAME_KEYS))
     accounts = config.setdefault("accounts", [])
     if isinstance(accounts, dict):
         config["accounts"] = [accounts]
@@ -128,6 +138,7 @@ def normalize_config(config: dict[str, Any]) -> None:
         account["name"] = str(account.get("name") or "")[:10]
         for field in SENSITIVE_ACCOUNT_FIELDS:
             account.setdefault(field, "")
+        normalize_account_cloud_games(account)
     device = config.setdefault("device", {})
     first_cookie = str(config["accounts"][0].get("cookie", "")) if config["accounts"] else ""
     presets = device.setdefault("presets", copy.deepcopy(DEFAULT_DEVICE_PRESETS))
@@ -157,6 +168,40 @@ def normalize_config(config: dict[str, Any]) -> None:
     web.setdefault("host", "127.0.0.1")
     web.setdefault("port", 5890)
     web.setdefault("password", "")
+    features = config.setdefault("features", {})
+    features.setdefault("game_checkin", True)
+    features.setdefault("cloud_game_checkin", False)
+    features.setdefault("bbs_tasks", False)
+
+
+def normalize_account_cloud_games(account: dict[str, Any]) -> None:
+    cloud_games = account.get("cloud_games", {})
+    if not isinstance(cloud_games, dict):
+        cloud_games = {}
+    account["cloud_games"] = cloud_games
+    tokens = normalize_cloud_game_tokens(cloud_games.get("tokens", {}))
+    cloud_games.pop("enabled", None)
+    cloud_games["tokens"] = tokens
+
+
+def normalize_cloud_game_tokens(value: Any) -> dict[str, str]:
+    tokens = value if isinstance(value, dict) else {}
+    return {key: str(tokens.get(key) or "") for key in SUPPORTED_CLOUD_GAME_KEYS}
+
+
+def normalize_cloud_game_enabled(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = list(SUPPORTED_CLOUD_GAME_KEYS)
+    enabled: list[str] = []
+    for item in raw_items:
+        key = str(item or "").strip()
+        if key in SUPPORTED_CLOUD_GAME_KEYS and key not in enabled:
+            enabled.append(key)
+    return enabled
 
 
 PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
@@ -314,6 +359,13 @@ def save_credentials(path: pathlib.Path, config: dict[str, Any]) -> None:
             {
                 "name": str(account.get("name") or ""),
                 **{field: str(account.get(field) or "") for field in SENSITIVE_ACCOUNT_FIELDS},
+                "cloud_games": {
+                    "tokens": normalize_cloud_game_tokens(
+                        (account.get("cloud_games") or {}).get("tokens", {})
+                        if isinstance(account.get("cloud_games"), dict)
+                        else {}
+                    )
+                },
             }
             for index, account in enumerate(config.get("accounts", []), start=1)
         ]
@@ -348,6 +400,7 @@ def merge_credentials(config: dict[str, Any], credentials: dict[str, Any]) -> No
                 account[field] = str(saved.get(field) or "")
             else:
                 account.setdefault(field, "")
+        merge_account_cloud_game_credentials(account, saved)
 
 
 def strip_credentials(config: dict[str, Any]) -> dict[str, Any]:
@@ -355,7 +408,24 @@ def strip_credentials(config: dict[str, Any]) -> dict[str, Any]:
     for account in public_config.get("accounts", []):
         for field in SENSITIVE_ACCOUNT_FIELDS:
             account.pop(field, None)
+        cloud_games = account.get("cloud_games")
+        if isinstance(cloud_games, dict):
+            cloud_games.pop("tokens", None)
     return public_config
+
+
+def merge_account_cloud_game_credentials(account: dict[str, Any], saved: dict[str, Any] | None) -> None:
+    cloud_games = account.setdefault("cloud_games", {})
+    if not isinstance(cloud_games, dict):
+        cloud_games = {}
+        account["cloud_games"] = cloud_games
+    tokens = normalize_cloud_game_tokens(cloud_games.get("tokens", {}))
+    if saved and isinstance(saved.get("cloud_games"), dict):
+        saved_tokens = normalize_cloud_game_tokens((saved.get("cloud_games") or {}).get("tokens", {}))
+        for key, value in saved_tokens.items():
+            if value and not tokens.get(key):
+                tokens[key] = value
+    cloud_games["tokens"] = tokens
 
 
 def credentials_path(config_path: str | pathlib.Path, config: dict[str, Any]) -> pathlib.Path:

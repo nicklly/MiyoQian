@@ -453,6 +453,7 @@ def is_sensitive_config_path(path: str) -> bool:
         "stoken",
         "mid",
         "token",
+        "tokens",
         "webhook",
         "userkey",
         "secret",

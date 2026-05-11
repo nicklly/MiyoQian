@@ -7,6 +7,12 @@ const gameOptions = [
   ["honkai2", "崩坏学园2"],
 ];
 
+const cloudGameOptions = [
+  ["genshin", "云原神", false, ""],
+  ["zzz", "云绝区零", false, ""],
+  ["starrail", "云星穹铁道", true, "云星穹铁道是版本更新赠送 600 分钟，不需要每日签到获取时长"],
+];
+
 const pushChannelOptions = [
   ["pushplus", "pushplus"],
   ["telegram", "Telegram"],
@@ -26,6 +32,7 @@ let isSavingConfig = false;
 let lastLoginStatus = "";
 let activeLoginIndex = null;
 let editingAccountIndex = null;
+let expandedCloudAccounts = new Set();
 let editingPushProviders = new Set();
 let editingCaptchaProviders = new Set();
 let logsPinnedToBottom = true;
@@ -67,6 +74,7 @@ function renderConfig() {
   $("runOnStart").checked = Boolean(config.schedule?.run_on_start ?? false);
 
   $("gameCheckin").checked = Boolean(config.features?.game_checkin ?? true);
+  $("cloudGameCheckin").checked = Boolean(config.features?.cloud_game_checkin ?? false);
   $("bbsTasks").checked = Boolean(config.features?.bbs_tasks ?? false);
   $("bbsCheckin").checked = Boolean(config.bbs?.checkin ?? true);
   $("bbsRead").checked = Boolean(config.bbs?.read ?? true);
@@ -76,6 +84,7 @@ function renderConfig() {
   $("pushErrorOnly").checked = Boolean(config.push?.error_only ?? false);
   $("captchaMaxRetries").value = config.captcha?.max_retries ?? 3;
   renderGames();
+  renderCloudGames();
   renderPushChannels();
   renderCaptchaChannels();
   updateTaskDependencyState();
@@ -97,10 +106,29 @@ function renderGames() {
   updateTaskDependencyState();
 }
 
+function renderCloudGames() {
+  const enabled = new Set(config.cloud_games?.enabled || []);
+  $("cloudGameChips").innerHTML = cloudGameOptions
+    .map(([key, label, disabled, reason]) => {
+      const title = reason ? ` title="${escapeAttr(reason)}"` : "";
+      return `
+        <label class="chip ${disabled ? "disabled" : ""}"${title}>
+          <input type="checkbox" data-cloud-game="${key}" data-autosave ${enabled.has(key) ? "checked" : ""} ${disabled ? 'data-cloud-game-disabled="1" disabled' : ""} />
+          <span>${label}</span>
+        </label>
+      `;
+    })
+    .join("");
+  updateTaskDependencyState();
+}
+
 function updateTaskDependencyState() {
   const gameEnabled = $("gameCheckin").checked;
+  const cloudEnabled = $("cloudGameCheckin").checked;
   const bbsEnabled = $("bbsTasks").checked;
   setTaskGroupDisabled("gameTaskGroup", "[data-game]", !gameEnabled);
+  setTaskGroupDisabled("cloudGameTaskGroup", "[data-cloud-game]:not([data-cloud-game-disabled])", !cloudEnabled);
+  updateAccountCloudGameInputs();
   setTaskGroupDisabled("bbsTaskGroup", "#bbsCheckin, #bbsRead, #bbsLike, #bbsShare", !bbsEnabled);
 }
 
@@ -110,6 +138,16 @@ function setTaskGroupDisabled(groupId, selector, disabled) {
   group.classList.toggle("is-disabled", disabled);
   group.querySelectorAll(selector).forEach((input) => {
     input.disabled = disabled;
+  });
+}
+
+function updateAccountCloudGameInputs() {
+  document.querySelectorAll(".account-cloud").forEach((section) => {
+    section.classList.remove("is-disabled");
+  });
+  document.querySelectorAll("[data-account-cloud-token]").forEach((input) => {
+    const isStarrail = input.dataset.accountCloudToken === "starrail";
+    input.disabled = isStarrail;
   });
 }
 
@@ -525,6 +563,9 @@ function renderAccounts() {
                 <svg><use href="#i-qr"></use></svg>
                 <span>${account.stuid ? "刷新" : "登录"}</span>
               </button>
+              <button class="ghost icon-only ${hasAccountCloudToken(account) || expandedCloudAccounts.has(index) ? "is-active" : ""}" type="button" data-toggle-cloud="${index}" title="云游戏签到凭证">
+                <svg><use href="#i-cloud"></use></svg>
+              </button>
               <button class="ghost icon-only" type="button" data-remove="${index}" title="删除账号">
                 <svg><use href="#i-trash"></use></svg>
               </button>
@@ -534,6 +575,7 @@ function renderAccounts() {
           <input data-field="stoken" type="hidden" value="${escapeAttr(account.stoken || "")}" />
           <input data-field="mid" type="hidden" value="${escapeAttr(account.mid || "")}" />
           <textarea class="hidden-field" data-field="cookie">${escapeHtml(account.cookie || "")}</textarea>
+          ${accountCloudGameFields(account, index)}
           <div class="account-login-slot" data-login-slot="${index}"></div>
         </div>
       `
@@ -557,12 +599,25 @@ function renderAccounts() {
       row?.querySelector('[data-field="name"]')?.focus();
     });
   });
+  document.querySelectorAll("[data-toggle-cloud]").forEach((button) => {
+    button.addEventListener("click", () => {
+      collectConfig();
+      const index = Number(button.dataset.toggleCloud);
+      if (expandedCloudAccounts.has(index)) {
+        expandedCloudAccounts.delete(index);
+      } else {
+        expandedCloudAccounts.add(index);
+      }
+      renderAccounts();
+    });
+  });
   document.querySelectorAll("[data-cancel-account]").forEach((button) => {
     button.addEventListener("click", async () => {
       const index = Number(button.dataset.cancelAccount);
       if (config.accounts[index]?._draft) {
         config.accounts.splice(index, 1);
         editingAccountIndex = null;
+        expandedCloudAccounts = shiftExpandedCloudAccounts(index);
         renderAccounts();
         return;
       }
@@ -586,6 +641,7 @@ function renderAccounts() {
       const [removed] = config.accounts.splice(index, 1);
       if (editingAccountIndex === index) editingAccountIndex = null;
       if (editingAccountIndex !== null && editingAccountIndex > index) editingAccountIndex -= 1;
+      expandedCloudAccounts = shiftExpandedCloudAccounts(index);
       renderAccounts();
       if (!removed?._draft) {
         autoSaveConfig()
@@ -594,6 +650,57 @@ function renderAccounts() {
       }
     });
   });
+  updateTaskDependencyState();
+}
+
+function accountCloudGameFields(account, index) {
+  const cloudGames = account.cloud_games || {};
+  const tokens = cloudGames.tokens || {};
+  if (!expandedCloudAccounts.has(index)) {
+    return accountCloudGameHiddenFields(tokens);
+  }
+  const rows = cloudGameOptions
+    .map(([key, label, disabled, reason]) => {
+      const title = reason ? ` title="${escapeAttr(reason)}"` : "";
+      const placeholder = disabled ? "不可配置" : "x-rpc-combo_token";
+      return `
+        <label class="cloud-token-row ${disabled ? "disabled" : ""}"${title}>
+          <span>${label}</span>
+          <input data-account-cloud-token="${key}" type="password" value="${escapeAttr(tokens[key] || "")}" placeholder="${placeholder}" autocomplete="off" data-autosave ${disabled ? "disabled" : ""} />
+        </label>
+      `;
+    })
+    .join("");
+  return `
+    <div class="account-cloud">
+      <div class="account-subhead">
+        <strong>云游戏签到</strong>
+        <small>从云游戏网页请求头复制 X-Rpc-Combo_token</small>
+      </div>
+      <div class="cloud-token-list">${rows}</div>
+    </div>
+  `;
+}
+
+function accountCloudGameHiddenFields(tokens) {
+  return `
+    <input data-account-cloud-token="genshin" type="hidden" value="${escapeAttr(tokens.genshin || "")}" />
+    <input data-account-cloud-token="zzz" type="hidden" value="${escapeAttr(tokens.zzz || "")}" />
+  `;
+}
+
+function hasAccountCloudToken(account) {
+  const tokens = account.cloud_games?.tokens || {};
+  return Boolean(String(tokens.genshin || "").trim() || String(tokens.zzz || "").trim());
+}
+
+function shiftExpandedCloudAccounts(removedIndex) {
+  const shifted = new Set();
+  expandedCloudAccounts.forEach((index) => {
+    if (index < removedIndex) shifted.add(index);
+    if (index > removedIndex) shifted.add(index - 1);
+  });
+  return shifted;
 }
 
 function collectConfig() {
@@ -605,10 +712,13 @@ function collectConfig() {
   };
   config.features = {
     game_checkin: $("gameCheckin").checked,
+    cloud_game_checkin: $("cloudGameCheckin").checked,
     bbs_tasks: $("bbsTasks").checked,
   };
   config.games = config.games || {};
   config.games.enabled = Array.from(document.querySelectorAll("[data-game]:checked")).map((input) => input.dataset.game);
+  config.cloud_games = config.cloud_games || {};
+  config.cloud_games.enabled = Array.from(document.querySelectorAll("[data-cloud-game]:checked")).map((input) => input.dataset.cloudGame);
   config.bbs = {
     ...(config.bbs || {}),
     checkin: $("bbsCheckin").checked,
@@ -638,6 +748,7 @@ function collectConfig() {
     row.querySelectorAll("[data-field]").forEach((field) => {
       item[field.dataset.field] = field.value.trim();
     });
+    item.cloud_games = collectAccountCloudGames(row);
     item.name = (item.name || "").slice(0, 10);
     item._draft = row.dataset.draft === "1";
     return item;
@@ -677,6 +788,19 @@ function collectCaptchaChannel(row) {
     }
   });
   return channel;
+}
+
+function collectAccountCloudGames(row) {
+  const tokens = {};
+  row.querySelectorAll("[data-account-cloud-token]").forEach((field) => {
+    tokens[field.dataset.accountCloudToken] = field.value.trim();
+  });
+  return {
+    tokens: {
+      genshin: tokens.genshin || "",
+      zzz: tokens.zzz || "",
+    },
+  };
 }
 
 function serverConfig({ includeDrafts = true } = {}) {
@@ -874,7 +998,19 @@ function addAccount() {
 }
 
 function emptyAccount(name) {
-  return { name, cookie: "", stuid: "", stoken: "", mid: "", _draft: true };
+  return {
+    name,
+    cookie: "",
+    stuid: "",
+    stoken: "",
+    mid: "",
+    cloud_games: emptyAccountCloudGames(),
+    _draft: true,
+  };
+}
+
+function emptyAccountCloudGames() {
+  return { tokens: { genshin: "", zzz: "" } };
 }
 
 function nextAccountName() {
@@ -920,14 +1056,21 @@ function latestResultText(scheduler, login, logs) {
   if (scheduler.running) return "正在签到";
   if (scheduler.last_error) return "任务失败";
   const latest = [...logs].reverse().find((line) => {
-    return /任务汇总|签到成功|社区任务结束|获得|任务执行完成|登录成功|失败|触发验证码/.test(line);
+    return /任务汇总|签到汇总|签到成功|社区任务结束|获得|任务执行完成|登录成功|失败|触发验证码/.test(line);
   });
   if (latest) {
+    if (latest.includes("云游戏成功项")) return "云游戏成功";
+    if (latest.includes("云游戏失败项")) return "云游戏部分失败";
+    if (latest.includes("游戏社区成功项") || latest.includes("游戏成功项")) return "社区签到成功";
+    if (latest.includes("游戏社区失败项") || latest.includes("游戏失败项")) return "社区部分失败";
     if (latest.includes("米游币任务汇总")) {
       const points = latest.match(/实际已获得\s*([^，\s]+)/);
       return points ? `米游币 ${points[1]}` : "米游币完成";
     }
-    if (latest.includes("游戏签到汇总")) return latest.includes("失败 0") ? "签到成功" : "部分失败";
+    if (latest.includes("云游戏签到汇总")) return latest.includes("失败 0") ? "云游戏成功" : "云游戏部分失败";
+    if (latest.includes("游戏社区签到汇总") || latest.includes("游戏签到汇总")) {
+      return latest.includes("失败 0") ? "社区签到成功" : "社区部分失败";
+    }
     if (latest.includes("社区任务结束")) {
       const points = latest.match(/今日已得\s*([^，\s]+)/);
       return points ? `米游币 ${points[1]}` : "米游币完成";
@@ -979,14 +1122,18 @@ function bindEvents() {
   });
   document.addEventListener("change", (event) => {
     if (event.target?.matches?.("[data-autosave]")) {
-      if (event.target.id === "gameCheckin" || event.target.id === "bbsTasks") {
+      if (event.target.id === "gameCheckin" || event.target.id === "cloudGameCheckin" || event.target.id === "bbsTasks") {
         updateTaskDependencyState();
       }
       scheduleAutoSave();
     }
   });
   document.addEventListener("input", (event) => {
-    if (event.target?.matches?.('input[type="time"][data-autosave], input[type="number"][data-autosave]')) {
+    if (
+      event.target?.matches?.(
+        'input[type="time"][data-autosave], input[type="number"][data-autosave], [data-account-cloud-token][data-autosave]'
+      )
+    ) {
       scheduleAutoSave();
     }
   });

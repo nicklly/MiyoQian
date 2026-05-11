@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "执行模式：全部任务=按配置执行；只执行游戏签到=跳过社区任务；只执行米游币社区任务=跳过游戏签到"
+        description: "执行模式：全部任务=按配置执行；只执行游戏社区/云游戏签到=跳过米游币社区任务；只执行米游币社区任务=跳过游戏社区和云游戏签到"
         required: true
         default: "全部任务"
         type: choice
         options:
           - 全部任务
-          - 只执行游戏签到
+          - 只执行游戏社区/云游戏签到
           - 只执行米游币社区任务
       account:
         description: "只执行指定账号名，留空执行全部账号"
@@ -82,7 +82,7 @@ jobs:
           cmd=(uv run python main.py run)
 
           case "${RUN_MODE}" in
-            只执行游戏签到|games)
+            只执行游戏社区/云游戏签到|只执行游戏签到|games)
               cmd+=(--games-only)
               ;;
             只执行米游币社区任务|bbs)
@@ -115,7 +115,9 @@ jobs:
 
           keywords = (
               "开始执行签到任务",
+              "游戏社区签到汇总",
               "游戏签到汇总",
+              "云游戏签到汇总",
               "米游币任务汇总",
               "社区任务结束",
               "今日任务已完成",

@@ -192,6 +192,7 @@ def build_account_sections_html(summary: dict[str, Any]) -> str:
               </summary>
               <div style="padding:12px;">
                 <div style="margin-bottom:10px;">{build_game_section_html(section)}</div>
+                <div style="margin-bottom:10px;">{build_cloud_game_section_html(section)}</div>
                 {build_bbs_section_html(section)}
               </div>
             </details>
@@ -211,8 +212,10 @@ def build_account_sections_text(summary: dict[str, Any], markdown: bool = False)
             "\n".join(
                 [
                     heading,
-                    "游戏签到：",
+                    "游戏社区签到：",
                     build_game_section_text(section, markdown=markdown),
+                    "云游戏签到：",
+                    build_cloud_game_section_text(section, markdown=markdown),
                     "米游币获取：",
                     build_bbs_section_text(section, markdown=markdown),
                 ]
@@ -224,18 +227,49 @@ def build_account_sections_text(summary: dict[str, Any], markdown: bool = False)
 def build_game_section_html(summary: dict[str, Any]) -> str:
     game = summary["game"]
     if not game["present"]:
-        return section_empty_html("游戏签到", "本次未执行游戏签到")
-    failed_notice = (
-        f'<div style="margin-top:8px;color:#b83b4b;font-size:13px;line-height:1.5;">{html.escape(shorten_text(game["failed_items"][0], 80))}</div>'
-        if game["failed_items"]
-        else ""
-    )
+        return section_empty_html("游戏社区签到", "本次未执行游戏社区签到")
+    item_rows = build_result_items_html(game)
     return f"""
     <div style="border:1px solid #d8e4ef;border-radius:8px;padding:14px;background:#ffffff;">
-      <div style="font-size:16px;font-weight:800;color:#102033;margin-bottom:8px;">游戏签到</div>
+      <div style="font-size:16px;font-weight:800;color:#102033;margin-bottom:8px;">游戏社区签到</div>
       {progress_html(game["percent"], game["label"], "#168df5")}
       <div style="margin-top:8px;color:#627389;font-size:13px;line-height:1.5;">{html.escape(game["summary"] or "无汇总信息")}</div>
-      {failed_notice}
+      {item_rows}
+    </div>
+    """.strip()
+
+
+def build_cloud_game_section_html(summary: dict[str, Any]) -> str:
+    cloud = summary["cloud_game"]
+    if not cloud["present"]:
+        return section_empty_html("云游戏签到", "本次未执行云游戏签到")
+    item_rows = build_result_items_html(cloud)
+    return f"""
+    <div style="border:1px solid #d8e4ef;border-radius:8px;padding:14px;background:#ffffff;">
+      <div style="font-size:16px;font-weight:800;color:#102033;margin-bottom:8px;">云游戏签到</div>
+      {progress_html(cloud["percent"], cloud["label"], "#168df5")}
+      <div style="margin-top:8px;color:#627389;font-size:13px;line-height:1.5;">{html.escape(cloud["summary"] or "无汇总信息")}</div>
+      {item_rows}
+    </div>
+    """.strip()
+
+
+def build_result_items_html(result: dict[str, Any]) -> str:
+    rows: list[str] = []
+    for item in result["failed_items"][:6]:
+        rows.append(result_item_html("失败", item, "#b83b4b", "#fdecef"))
+    for item in result["items"][:6]:
+        rows.append(result_item_html("成功", item, "#1c7c61", "#edf8f3"))
+    if not rows:
+        return ""
+    return '<div style="margin-top:10px;border-top:1px solid #edf3f8;">' + "".join(rows) + "</div>"
+
+
+def result_item_html(label: str, item: str, color: str, bg: str) -> str:
+    return f"""
+    <div style="padding:8px 0;border-bottom:1px solid #edf3f8;font-size:13px;line-height:1.5;">
+      <span style="display:inline-block;min-width:34px;text-align:center;border-radius:999px;background:{html.escape(bg)};color:{html.escape(color)};font-weight:700;margin-right:8px;">{html.escape(label)}</span>
+      <span style="color:#102033;">{html.escape(shorten_text(item, 120))}</span>
     </div>
     """.strip()
 
@@ -297,13 +331,26 @@ def progress_html(percent: int, label: str, color: str, compact: bool = False) -
 def build_game_section_text(summary: dict[str, Any], markdown: bool = False) -> str:
     game = summary["game"]
     if not game["present"]:
-        return "- 本次未执行游戏签到"
+        return "- 本次未执行游戏社区签到"
+    return build_result_section_text(game, "游戏社区签到汇总")
+
+
+def build_cloud_game_section_text(summary: dict[str, Any], markdown: bool = False) -> str:
+    cloud = summary["cloud_game"]
+    if not cloud["present"]:
+        return "- 本次未执行云游戏签到"
+    return build_result_section_text(cloud, "云游戏签到汇总")
+
+
+def build_result_section_text(result: dict[str, Any], fallback_summary: str) -> str:
     lines = [
-        f"- {game['summary'] or '游戏签到汇总'}",
-        f"- 进度 {text_bar(game['percent'])} {game['label']}",
+        f"- {result['summary'] or fallback_summary}",
+        f"- 进度 {text_bar(result['percent'])} {result['label']}",
     ]
-    for item in (game["failed_items"] or game["items"])[:4]:
-        lines.append(f"- {item}")
+    for item in result["failed_items"][:6]:
+        lines.append(f"- 失败：{item}")
+    for item in result["items"][:6]:
+        lines.append(f"- 成功：{item}")
     return "\n".join(lines)
 
 
@@ -338,7 +385,7 @@ def split_account_sections(lines: list[str]) -> list[dict[str, Any]]:
     current_label = ""
     current_lines: list[str] = []
     for line in lines:
-        if line.startswith("# 账号"):
+        if line.startswith("# "):
             if current_label or current_lines:
                 sections.append({"label": current_label or "任务摘要", "lines": current_lines})
             current_label = line.removeprefix("# ").strip()
@@ -351,12 +398,18 @@ def split_account_sections(lines: list[str]) -> list[dict[str, Any]]:
 
 
 def build_account_summary(label: str, lines: list[str], success: bool) -> dict[str, Any]:
-    game_summary = first_line(lines, "游戏签到汇总：")
-    game_success_items = prefixed_lines(lines, "游戏成功项：")
-    game_failed_items = prefixed_lines(lines, "游戏失败项：")
-    game_counts = parse_counts(game_summary)
-    game_total = sum(game_counts)
-    game_percent = round(game_counts[0] / game_total * 100) if game_total else (100 if success and game_summary else 0)
+    game = build_result_summary(
+        first_line(lines, "游戏社区签到汇总：") or first_line(lines, "游戏签到汇总："),
+        task_items(lines, "游戏社区成功项：") + task_items(lines, "游戏成功项："),
+        task_items(lines, "游戏社区失败项：") + task_items(lines, "游戏失败项："),
+        success,
+    )
+    cloud_game = build_result_summary(
+        first_line(lines, "云游戏签到汇总："),
+        task_items(lines, "云游戏成功项："),
+        task_items(lines, "云游戏失败项："),
+        success,
+    )
 
     bbs_summary = first_line(lines, "米游币任务汇总：")
     bbs_progress = first_line(lines, "米游币今日进度：")
@@ -368,17 +421,8 @@ def build_account_summary(label: str, lines: list[str], success: bool) -> dict[s
 
     return {
         "label": label,
-        "game": {
-            "present": bool(game_summary or game_success_items or game_failed_items),
-            "summary": game_summary,
-            "success": game_counts[0],
-            "failed": game_counts[1],
-            "skipped": game_counts[2],
-            "percent": game_percent,
-            "label": f"{game_counts[0]}/{game_total or game_counts[0]} 成功",
-            "items": game_success_items,
-            "failed_items": game_failed_items,
-        },
+        "game": game,
+        "cloud_game": cloud_game,
         "bbs": {
             "present": bbs_present,
             "summary": bbs_summary,
@@ -390,6 +434,23 @@ def build_account_summary(label: str, lines: list[str], success: bool) -> dict[s
             "point_percent": round(points["today_done"] / points["possible"] * 100) if points["possible"] else 0,
             "today_done_points": points["today_done"],
         },
+    }
+
+
+def build_result_summary(summary: str, success_items: list[str], failed_items: list[str], success: bool) -> dict[str, Any]:
+    counts = parse_counts(summary)
+    total = sum(counts)
+    percent = round(counts[0] / total * 100) if total else (100 if success and summary else 0)
+    return {
+        "present": bool(summary or success_items or failed_items),
+        "summary": summary,
+        "success": counts[0],
+        "failed": counts[1],
+        "skipped": counts[2],
+        "percent": percent,
+        "label": f"{counts[0]}/{total or counts[0]} 成功",
+        "items": success_items,
+        "failed_items": failed_items,
     }
 
 
@@ -520,9 +581,9 @@ def parse_counts(line: str) -> tuple[int, int, int]:
 
 def is_task_success(lines: list[str]) -> bool:
     for line in lines:
-        if line.startswith(("游戏失败项：", "米游币失败项：")):
+        if line.startswith(("游戏社区失败项：", "游戏失败项：", "云游戏失败项：", "米游币失败项：")):
             return False
-        if line.startswith(("游戏签到汇总：", "米游币任务汇总：")):
+        if line.startswith(("游戏社区签到汇总：", "游戏签到汇总：", "云游戏签到汇总：", "米游币任务汇总：")):
             if number_after(line, "失败") > 0:
                 return False
         elif line in {"任务状态获取失败，请检查 cookie/stoken", "获取帖子列表失败，无法执行看帖/点赞/分享"}:
@@ -609,8 +670,10 @@ def build_feishu_post(title: str, message: str, success: bool) -> dict[str, Any]
             [
                 [{"tag": "text", "text": ""}],
                 [{"tag": "text", "text": section["label"]}],
-                [{"tag": "text", "text": "游戏签到"}],
+                [{"tag": "text", "text": "游戏社区签到"}],
                 [{"tag": "text", "text": build_game_section_text(section)}],
+                [{"tag": "text", "text": "云游戏签到"}],
+                [{"tag": "text", "text": build_cloud_game_section_text(section)}],
                 [{"tag": "text", "text": "米游币获取"}],
                 [{"tag": "text", "text": build_bbs_section_text(section)}],
             ]
@@ -687,6 +750,7 @@ def is_summary_line(line: str) -> bool:
         "汇总：",
         "成功项：",
         "失败项：",
+        "云游戏",
         "社区任务结束：",
         "米游币今日进度：",
         "今日任务已完成",
