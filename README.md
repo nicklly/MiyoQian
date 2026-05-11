@@ -824,6 +824,10 @@ uv run python main.py serve --port 5891
 - [Womsxd/MihoyoBBSTools](https://github.com/Womsxd/MihoyoBBSTools)
 - [jiarui666/mihoyo_qr_login](https://github.com/jiarui666/mihoyo_qr_login)
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Marchen-zcl/MiyoQian&type=Date)](https://star-history.com/#Marchen-zcl/MiyoQian&Date)
+
 ## 免责声明
 
 本项目仅供学习和个人使用，请勿用于商业用途或违反米哈游、米游社相关用户协议的场景。
