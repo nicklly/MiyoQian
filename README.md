@@ -136,8 +136,12 @@ docker compose up -d --build
 
 适合不想长期运行电脑、服务器或 NAS 的用户。Actions 会按 `.github/workflows/checkin.yml` 里的时间自动执行一次 `python main.py run`。
 
+> ⚠️ **必须使用 "Use this template" 创建项目，不要使用 Fork！**
+>
+> Fork 仓库的 Actions 运行时长会统计到上游（原）仓库，会导致上游仓库因超出时长限制而被封禁。
+> 请点击仓库右上角的 **`Use this template`** -> **`Create a new repository`**，将项目创建到你自己的 GitHub 账号下。
+>
 > GitHub Actions 只负责定时触发一次性签到，不会启动 Web 控制台。首次扫码登录和配置调整建议先在本地或 Docker 环境完成。
-> 使用前请先 Fork 本项目到自己的 GitHub 账号下，后续所有 Secrets 和 Actions 都在你自己的 Fork 仓库里配置和运行。
 
 #### 1. 本地生成配置和凭证
 
@@ -148,16 +152,17 @@ docker compose up -d --build
 | `config.yaml` | 公开配置，不建议直接提交仓库 |
 | `data/credentials.yaml` | 登录凭证，敏感信息，绝对不要提交仓库 |
 
-#### 2. Fork 项目并启用 Actions
+#### 2. 创建项目并启用 Actions
 
-点击本仓库右上角的 `Fork`，把项目复制到你自己的 GitHub 账号下。
+点击本仓库右上角的 `Use this template` -> `Create a new repository`，将项目创建到你自己的 GitHub 账号下。
 
-进入你自己的 Fork 仓库后，打开 `Actions` 页面。如果页面提示 workflow 被禁用，点击启用。开启Actions后无论配置secrets与否都会每天执行一次
-不要在原项目仓库里配置你的账号凭证，也不要把凭证发给项目作者。
+进入你创建的新仓库后，打开 `Actions` 页面。如果页面提示 workflow 被禁用，点击启用。
+
+开启 Actions 后无论配置 secrets 与否都会每天执行一次。不要在原项目仓库里配置你的账号凭证，也不要把凭证发给项目作者。
 
 #### 3. 添加 GitHub Secrets
 
-进入你自己的 Fork 仓库：
+进入你创建的仓库：
 
 ```text
 Settings -> Secrets and variables -> Actions -> New repository secret
@@ -200,7 +205,7 @@ schedule:
 
 #### 5. 手动执行一次
 
-进入你自己的 Fork 仓库的 `Actions` 页面，选择 `米游签定时签到`，点击 `Run workflow`：
+进入你创建的仓库的 `Actions` 页面，选择 `米游签定时签到`，点击 `Run workflow`：
 
 `执行模式` 用来决定这一次手动运行要跑哪些任务：
 
