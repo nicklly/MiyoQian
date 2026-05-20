@@ -26,7 +26,7 @@ from ..core.http import ApiClient
 from ..core.logs import append_log, configure_logger, format_line, print_startup_banner
 from ..tasks.shop_exchange import ShopExchange
 from .exchange_scheduler import ExchangeScheduler
-from .notifier import is_task_success, send_push
+from .notifier import is_task_success, send_push, send_exchange_push
 from .runner import run_tasks
 from .scheduler import DailyScheduler
 
@@ -321,6 +321,7 @@ class WebApp:
     def shop_exchange_plan_once(self, plan_index: int) -> dict[str, Any]:
         with self.lock:
             plans = self.config.get("shop_exchange", {}).get("plans") or []
+            shop_config = self.config.get("shop_exchange", {})
             if plan_index < 0 or plan_index >= len(plans):
                 raise ValueError("兑换计划不存在")
             plan = copy.deepcopy(plans[plan_index])
@@ -339,11 +340,17 @@ class WebApp:
                 save_config(self.config_path, self.config)
                 self.exchange_scheduler.reload(self.config)
         self.log(f"手动商品兑换计划完成 {plan_index + 1}: {goods_name}，{summary}", "exchange")
+
+        # 发送兑换结果推送
+        if shop_config.get("push", False):
+            self._send_exchange_push(goods_name, result, plan)
+
         return result
 
     def run_shop_exchange_plan(self, plan_index: int) -> None:
         with self.lock:
             plans = self.config.get("shop_exchange", {}).get("plans") or []
+            shop_config = self.config.get("shop_exchange", {})
             if plan_index < 0 or plan_index >= len(plans):
                 raise ValueError("兑换计划不存在")
             plan = copy.deepcopy(plans[plan_index])
@@ -365,6 +372,29 @@ class WebApp:
                 save_config(self.config_path, self.config)
                 self.exchange_scheduler.reload(self.config)
         self.log(f"商品兑换计划完成: {goods_name}，{summary}", "exchange")
+
+        # 发送兑换结果推送
+        if shop_config.get("push", False):
+            self._send_exchange_push(goods_name, result, plan)
+
+    def _send_exchange_push(self, goods_name: str, result: dict[str, Any], plan: dict[str, Any]) -> None:
+        """发送商品兑换结果推送"""
+        with self.lock:
+            config = self.config
+        try:
+            is_success = result.get("ok", False)
+
+            # 构建推送标题
+            if is_success:
+                title = "🎉 商品兑换成功"
+            else:
+                title = "❌ 商品兑换失败"
+
+            push_result = send_exchange_push(config, title, goods_name, result, plan, success=is_success)
+            if push_result:
+                self.log(f"商品兑换推送已发送: {push_result}", "exchange")
+        except Exception as exc:
+            self.log(f"商品兑换推送发送失败: {exc}", "exchange")
 
     def _account_by_index(self, account_index: int) -> dict[str, Any]:
         with self.lock:
@@ -745,6 +775,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(plan, dict):
                     raise ValueError("兑换计划必须是 JSON 对象")
                 result = self.app.shop_exchange_once(plan)
+                # 处理直接传递plan的情况，也需要推送支持
+                shop_config = self.app.config.get("shop_exchange", {})
+                if shop_config.get("push", False):
+                    goods_name = plan.get("goods_name") or plan.get("goods_id") or "未知商品"
+                    self.app._send_exchange_push(goods_name, result, plan)
                 self.send_json({"ok": True, "result": result})
                 return
             self.send_error_json("接口不存在", HTTPStatus.NOT_FOUND)

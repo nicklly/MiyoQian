@@ -45,6 +45,38 @@ def send_push(config: dict[str, Any], title: str, message: str, success: bool = 
         return f"推送失败: {exc}"
 
 
+def send_exchange_push(
+    config: dict[str, Any],
+    title: str,
+    goods_name: str,
+    result: dict[str, Any],
+    plan: dict[str, Any],
+    success: bool = True,
+) -> str:
+    """发送商品兑换推送"""
+    push = config.get("push") or {}
+    if not push.get("enable"):
+        return ""
+    if push.get("error_only") and success:
+        return ""
+    channels = push_channels(push)
+    if not channels:
+        return "推送失败: 未配置推送通道"
+    results: list[str] = []
+    try:
+        with httpx.Client(timeout=20, follow_redirects=True) as client:
+            for channel in channels:
+                provider = str(channel.get("provider") or "").strip().lower()
+                try:
+                    _send_exchange(client, provider, channel, title, goods_name, result, plan, success)
+                    results.append(f"{provider}: 成功")
+                except Exception as exc:
+                    results.append(f"{provider}: 失败 ({exc})")
+        return "推送结果: " + "；".join(results)
+    except Exception as exc:
+        return f"推送失败: {exc}"
+
+
 def push_channels(push: dict[str, Any]) -> list[dict[str, Any]]:
     raw_channels = push.get("channels")
     if isinstance(raw_channels, list):
@@ -56,6 +88,108 @@ def push_channels(push: dict[str, Any]) -> list[dict[str, Any]]:
     if push.get("provider") and push.get("enable"):
         return [push]
     return []
+
+
+def _send_exchange(
+    client: httpx.Client,
+    provider: str,
+    push: dict[str, Any],
+    title: str,
+    goods_name: str,
+    result: dict[str, Any],
+    plan: dict[str, Any],
+    success: bool,
+) -> None:
+    """发送商品兑换推送"""
+    token = str(push.get("token") or "").strip()
+    webhook = str(push.get("webhook") or "").strip()
+    api_url = str(push.get("api_url") or "").strip()
+    topic = str(push.get("topic") or "").strip()
+    chat_id = str(push.get("chat_id") or "").strip()
+    secret = str(push.get("secret") or "").strip()
+    smtp_host = str(push.get("smtp_host") or "").strip()
+    smtp_port = int(push.get("smtp_port") or 465)
+    smtp_user = str(push.get("smtp_user") or "").strip()
+    smtp_password = str(push.get("smtp_password") or "").strip()
+    mail_from = str(push.get("mail_from") or smtp_user).strip()
+    mail_to = str(push.get("mail_to") or "").strip()
+    smtp_ssl = bool(push.get("smtp_ssl", True))
+
+    if provider == "pushplus":
+        require(token, "token")
+        url = api_url or "https://www.pushplus.plus/send"
+        payload = pushplus_payload(
+            token, title, build_exchange_html(title, goods_name, result, plan, success), "html", topic
+        )
+        try:
+            request_json(client, "POST", url, json=payload)
+        except Exception:
+            payload = pushplus_payload(
+                token, title, build_exchange_markdown(title, goods_name, result, plan, success), "markdown", topic
+            )
+            request_json(client, "POST", url, json=payload)
+        return
+
+    if provider == "telegram":
+        require(token, "token")
+        require(chat_id, "chat_id")
+        url = api_url or f"https://api.telegram.org/bot{token}/sendMessage"
+        request_json(
+            client,
+            "POST",
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": build_exchange_telegram(title, goods_name, result, plan, success),
+                "parse_mode": "HTML",
+            },
+        )
+        return
+
+    if provider in {"dingrobot", "dingtalk", "钉钉"}:
+        require(webhook, "webhook")
+        url = signed_ding_url(webhook, secret) if secret else webhook
+        request_json(
+            client,
+            "POST",
+            url,
+            json={
+                "msgtype": "markdown",
+                "markdown": {"title": title, "text": build_exchange_markdown(title, goods_name, result, plan, success)},
+            },
+        )
+        return
+
+    if provider in {"feishubot", "feishu", "飞书"}:
+        require(webhook, "webhook")
+        lines = [
+            f"**{title}**",
+            "",
+            "**商品兑换通知**",
+            f"商品：{goods_name}",
+            f"账号：{plan.get('account', '未知')}",
+            f"结果：{result.get('message', '未知')}",
+            f"时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        ]
+        request_json(client, "POST", webhook, json={"msg_type": "text", "content": {"text": "\n".join(lines)}})
+        return
+
+    if provider in {"email", "smtp", "mail", "邮箱"}:
+        send_mail(
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_user=smtp_user,
+            smtp_password=smtp_password,
+            mail_from=mail_from,
+            mail_to=mail_to,
+            title=title,
+            message=build_exchange_text(title, goods_name, result, plan, success),
+            html_message=build_exchange_html(title, goods_name, result, plan, success),
+            smtp_ssl=smtp_ssl,
+        )
+        return
+
+    raise ValueError(f"不支持的推送通道: {provider}")
 
 
 def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str, message: str, success: bool) -> None:
@@ -173,6 +307,56 @@ def build_template_context(title: str, message: str, success: bool, detail_limit
         "detail_html": html.escape(detail),
         "detail_markdown": escape_markdown_code(detail),
         "detail_text": detail,
+    }
+
+
+def build_exchange_template_context(
+    title: str,
+    goods_name: str,
+    result: dict[str, Any],
+    plan: dict[str, Any],
+    success: bool,
+) -> dict[str, str]:
+    """为商品兑换构建推送模板上下文"""
+    status = "兑换成功" if success else "兑换失败"
+    retcode = result.get("retcode", -1)
+    message = result.get("message", "未知结果")
+    attempt = result.get("attempt", 1)
+
+    # 商品信息
+    price = plan.get("price", 0)
+    icon = plan.get("icon", "")
+    account_name = plan.get("account", "未知账号")
+    exchange_time = result.get("sent_at", datetime.now().isoformat())
+
+    # 构建商品图标HTML
+    icon_html = ""
+    if icon:
+        icon_html = f'<img src="{html.escape(icon)}" style="width:60px;height:60px;border-radius:8px;object-fit:cover;margin-right:12px;" alt="商品图标">'
+    else:
+        icon_html = f'<div style="width:60px;height:60px;border-radius:8px;background:#d8e4ef;display:flex;align-items:center;justify-content:center;margin-right:12px;"><svg width="30" height="30" viewBox="0 0 24 24" fill="#168df5"><path d="M20.38 3.4a1.6 1.6 0 0 0-1.52-.07L13 5.6V4.1a1.6 1.6 0 0 0-2.5-1.3l-8 6.4a1.6 1.6 0 0 0-.2 2.3l8 9.6a1.6 1.6 0 0 0 2.7-.7V13l5.9 3.5a1.6 1.6 0 0 0 2.4-1.4V5a1.6 1.6 0 0 0-1.46-1.6z"/></svg></div>'
+
+    return {
+        "title": html.escape(title),
+        "title_text": title,
+        "status": html.escape(status),
+        "status_text": status,
+        "status_color": "#1c9a68" if success else "#b83b4b",
+        "status_bg": "#edf8f3" if success else "#fdecef",
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "goods_name": html.escape(goods_name),
+        "goods_name_text": goods_name,
+        "price": str(price),
+        "account_name": html.escape(account_name),
+        "account_name_text": account_name,
+        "retcode": str(retcode),
+        "message": html.escape(message),
+        "message_text": message,
+        "attempt": str(attempt),
+        "exchange_time": exchange_time,
+        "icon_html": icon_html,
+        "detail_html": html.escape(f"结果：{message}({retcode})，尝试 {attempt} 次"),
+        "detail_text": f"结果：{message}({retcode})，尝试 {attempt} 次",
     }
 
 
@@ -656,6 +840,30 @@ def render_template(name: str, values: dict[str, str]) -> str:
     for key, value in values.items():
         template = template.replace("{{" + key + "}}", value)
     return template.strip()
+
+
+def build_exchange_html(title: str, goods_name: str, result: dict[str, Any], plan: dict[str, Any], success: bool) -> str:
+    """构建商品兑换HTML推送"""
+    context = build_exchange_template_context(title, goods_name, result, plan, success)
+    return render_template("exchange.html", context)
+
+
+def build_exchange_telegram(title: str, goods_name: str, result: dict[str, Any], plan: dict[str, Any], success: bool) -> str:
+    """构建商品兑换Telegram推送"""
+    context = build_exchange_template_context(title, goods_name, result, plan, success)
+    return render_template("exchange_telegram.html", context)
+
+
+def build_exchange_markdown(title: str, goods_name: str, result: dict[str, Any], plan: dict[str, Any], success: bool) -> str:
+    """构建商品兑换Markdown推送"""
+    context = build_exchange_template_context(title, goods_name, result, plan, success)
+    return render_template("exchange_markdown.md", context)
+
+
+def build_exchange_text(title: str, goods_name: str, result: dict[str, Any], plan: dict[str, Any], success: bool) -> str:
+    """构建商品兑换文本推送"""
+    context = build_exchange_template_context(title, goods_name, result, plan, success)
+    return render_template("exchange_text.txt", context)
 
 
 def build_feishu_post(title: str, message: str, success: bool) -> dict[str, Any]:

@@ -96,4 +96,5 @@ shop_exchange:
   enable: true
   retry_seconds: 20
   retry_interval: 0.4
+  push: true          # 是否发送兑换结果推送
   plans: []

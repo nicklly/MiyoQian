@@ -820,6 +820,7 @@ function renderShopConfig() {
   $("shopEnable").checked = Boolean(shop.enable ?? false);
   $("shopRetrySeconds").value = shop.retry_seconds ?? 20;
   $("shopRetryInterval").value = shop.retry_interval ?? 0.4;
+  $("shopPush").checked = Boolean(shop.push ?? false);
   if ($("shopGoodsMetric")) $("shopGoodsMetric").textContent = shopGoodsLoading ? "加载中" : String(shopGoods.length);
   if ($("shopPlansMetric")) $("shopPlansMetric").textContent = String((shop.plans || []).length);
   renderShopGameFilter();
@@ -1055,6 +1056,7 @@ function collectShopExchange() {
     enable: Boolean($("shopEnable")?.checked ?? existing.enable ?? false),
     retry_seconds: Number($("shopRetrySeconds")?.value || existing.retry_seconds || 20),
     retry_interval: Number($("shopRetryInterval")?.value || existing.retry_interval || 0.4),
+    push: Boolean($("shopPush")?.checked ?? existing.push ?? false),
     plans: [],
   };
   document.querySelectorAll("[data-shop-plan]").forEach((row) => {
