@@ -955,6 +955,7 @@ function renderShopGoods() {
 
 function shopGoodCard(good, index) {
   const soldOut = isShopGoodSoldOut(good);
+  const canAddPlan = canShopGoodAddPlan(good);
   const exchangeNow = canShopGoodExchangeNow(good);
   const exchanging = shopExchangeNowGoodsId === String(good.goods_id || "");
   const exchangeLabel =
@@ -992,7 +993,7 @@ function shopGoodCard(good, index) {
         </div>
       </div>
       <div class="shop-good-actions">
-        <button class="ghost" type="button" data-shop-add="${index}" title="${soldOut ? "商品已售罄" : "加入兑换计划"}" ${soldOut ? "disabled" : ""}>
+        <button class="ghost" type="button" data-shop-add="${index}" title="${canAddPlan ? "加入兑换计划" : "商品已售罄"}" ${canAddPlan ? "" : "disabled"}>
           <svg><use href="#i-plus"></use></svg>
           <span>计划</span>
         </button>
@@ -1195,7 +1196,8 @@ function collectShopExchange() {
 
 async function addShopPlan(good) {
   if (!good) return;
-  if (isShopGoodSoldOut(good)) throw new Error("商品已售罄，不能加入兑换计划");
+  if (!canShopGoodAddPlan(good))
+    throw new Error("商品已售罄，不能加入兑换计划");
   collectConfig();
   config.shop_exchange = config.shop_exchange || {
     enable: true,
@@ -1382,6 +1384,11 @@ function shopServerDisplay(plan) {
 
 function isShopGoodSoldOut(good) {
   return Boolean(good?.sold_out);
+}
+
+function canShopGoodAddPlan(good) {
+  if (!isShopGoodSoldOut(good)) return true;
+  return good?.display_status === "sold_out_with_next";
 }
 
 function canShopGoodExchangeNow(good) {
