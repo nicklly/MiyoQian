@@ -1024,7 +1024,11 @@ function renderShopPlans() {
   bindShopPlanEvents();
   plans.forEach((plan, index) => {
     const key = shopPlanMetaKey(plan);
-    if (shopPlanNeedsAccountMeta(plan) && !shopPlanMetaCache.has(key) && !shopPlanMetaLoading.has(key)) {
+    if (
+      shopPlanNeedsAccountMeta(plan) &&
+      !shopPlanMetaCache.has(key) &&
+      !shopPlanMetaLoading.has(key)
+    ) {
       void ensureShopPlanMeta(index);
     }
   });
