@@ -340,7 +340,21 @@ class WebApp:
             plan = copy.deepcopy(plans[plan_index])
             goods_name = plan.get("goods_name") or plan.get("goods_id")
         self.log(f"开始手动执行商品兑换计划 {plan_index + 1}: {goods_name}", "exchange")
-        result = self.shop_exchange_once(plan)
+        try:
+            result = self.shop_exchange_once(plan)
+        except Exception as exc:
+            summary = f"异常: {exc}"
+            with self.lock:
+                plans = self.config.get("shop_exchange", {}).get("plans") or []
+                if plan_index < len(plans):
+                    plans[plan_index]["last_result"] = summary
+                    plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
+                    plans[plan_index]["last_attempt_key"] = f"manual:{datetime.now().isoformat(timespec='seconds')}"
+                    save_config(self.config_path, self.config)
+                    self.exchange_scheduler.reload(self.config)
+            if shop_config.get("push", False):
+                self._send_exchange_push(goods_name, {"ok": False, "message": summary}, plan)
+            raise
         summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
         with self.lock:
             plans = self.config.get("shop_exchange", {}).get("plans") or []
@@ -373,7 +387,20 @@ class WebApp:
             plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
             save_config(self.config_path, self.config)
         self.log(f"开始执行商品兑换计划: {goods_name}", "exchange")
-        result = self.shop_exchange_once(plan)
+        try:
+            result = self.shop_exchange_once(plan)
+        except Exception as exc:
+            summary = f"异常: {exc}"
+            with self.lock:
+                plans = self.config.get("shop_exchange", {}).get("plans") or []
+                if plan_index < len(plans):
+                    plans[plan_index]["last_result"] = summary
+                    plans[plan_index]["last_run"] = datetime.now().isoformat(timespec="seconds")
+                    save_config(self.config_path, self.config)
+                    self.exchange_scheduler.reload(self.config)
+            if shop_config.get("push", False):
+                self._send_exchange_push(goods_name, {"ok": False, "message": summary}, plan)
+            raise
         summary = f"{result.get('message', '未知结果')}({result.get('retcode')})，请求 {result.get('attempt', 1)} 次"
         with self.lock:
             plans = self.config.get("shop_exchange", {}).get("plans") or []
@@ -831,11 +858,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
-        try:
-            self.end_headers()
-            self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        self.end_headers()
+        self.wfile.write(data)
 
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or "0")
@@ -849,18 +873,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, data: dict[str, Any], status: HTTPStatus = HTTPStatus.OK, set_cookie: str = "") -> None:
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        try:
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(raw)))
-            if set_cookie:
-                # 7 天过期 (7 * 24 * 60 * 60 = 604800 秒)
-                self.send_header("Set-Cookie", f"{AUTH_COOKIE}={set_cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800")
-            self.end_headers()
-            self.wfile.write(raw)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(raw)))
+        if set_cookie:
+            # 7 天过期 (7 * 24 * 60 * 60 = 604800 秒)
+            self.send_header("Set-Cookie", f"{AUTH_COOKIE}={set_cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800")
+        self.end_headers()
+        self.wfile.write(raw)
 
     def send_error_json(self, message: str, status: HTTPStatus) -> None:
         self.send_json({"ok": False, "error": message}, status=status)

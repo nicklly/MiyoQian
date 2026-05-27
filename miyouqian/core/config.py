@@ -218,6 +218,7 @@ def normalize_shop_exchange(config: dict[str, Any]) -> None:
             "icon": str(raw.get("icon") or ""),
             "price": parse_int(raw.get("price"), 0),
             "stock": str(raw.get("stock") or ""),
+            "type": parse_int(raw.get("type"), 0),
             "exchange_at": exchange_at,
             "game": str(raw.get("game") or ""),
             "game_biz": str(raw.get("game_biz") or ""),
