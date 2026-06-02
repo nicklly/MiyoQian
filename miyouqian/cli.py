@@ -9,6 +9,7 @@ import sys
 
 from . import __version__
 from .auth.login import QRLogin, print_qrcode
+from .core import cookies
 from .core.config import (
     create_config,
     credentials_path,
@@ -91,7 +92,13 @@ def command_login(config_path: pathlib.Path, account_name: str, timeout: int, sa
         if image_path:
             print(f"二维码图片已保存: {image_path.resolve()}")
         scan = login.wait(ticket, timeout=timeout)
-        account_data = login.exchange_tokens(scan["uid"], scan["game_token"])
+        account_data = {**scan, **login.get_additional_tokens(scan["stoken"], scan["mid"])}
+        account_data["cookie"] = cookies.build_cookie(
+            account_data["stuid"],
+            account_data["mid"],
+            account_data["ltoken"],
+            account_data["cookie_token"],
+        )
     upsert_account(config, account_name, account_data)
     save_config(config_path, config)
     print(f"账号 {account_name} 凭证已写入: {credentials_path(config_path, config).resolve()}")

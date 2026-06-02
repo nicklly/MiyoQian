@@ -688,11 +688,18 @@ function renderAccounts() {
   document.querySelectorAll("[data-cancel-account]").forEach((button) => {
     button.addEventListener("click", async () => {
       const index = Number(button.dataset.cancelAccount);
+      if (activeLoginIndex === index) {
+        await api("/api/login/cancel", { method: "POST", body: "{}" }).catch(() => {});
+        activeLoginIndex = null;
+        renderLoginSlot({ running: false, status: "idle" });
+      }
       if (config.accounts[index]?._draft) {
         config.accounts.splice(index, 1);
         editingAccountIndex = null;
+        activeLoginIndex = null;
         expandedCloudAccounts = shiftExpandedCloudAccounts(index);
         renderAccounts();
+        renderLoginSlot({ running: false, status: "idle" });
         return;
       }
       editingAccountIndex = null;
@@ -710,8 +717,13 @@ function renderAccounts() {
     });
   });
   document.querySelectorAll("[data-remove]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const index = Number(button.dataset.remove);
+      if (activeLoginIndex === index) {
+        await api("/api/login/cancel", { method: "POST", body: "{}" }).catch(() => {});
+        activeLoginIndex = null;
+        renderLoginSlot({ running: false, status: "idle" });
+      }
       const [removed] = config.accounts.splice(index, 1);
       if (editingAccountIndex === index) editingAccountIndex = null;
       if (editingAccountIndex !== null && editingAccountIndex > index)
@@ -1719,7 +1731,7 @@ async function refreshStatus() {
   }
   updateLogs(logs);
 
-  if (login.running || login.status === "error") {
+  if (login.running) {
     activeLoginIndex = login.account_index ?? activeLoginIndex;
   }
   renderLoginSlot(login);
@@ -1728,6 +1740,7 @@ async function refreshStatus() {
     button.disabled = Boolean(login.running);
   });
   if (login.status === "success" && lastLoginStatus !== "success") {
+    showToast(login.message || "登录成功");
     if (login.draft) {
       applyDraftLogin(login);
       activeLoginIndex = null;
@@ -1768,10 +1781,14 @@ function renderLoginSlot(login) {
   if (login.qr) {
     slot.innerHTML = `
       <div class="inline-login">
-        <img src="${login.qr}" alt="米游社扫码登录二维码" />
+        <button type="button" class="qr-refresh-btn" title="点击刷新二维码">
+          <img src="${login.qr}" alt="米游社扫码登录二维码" />
+          <span class="qr-refresh-hint">点击刷新</span>
+        </button>
         <p>${escapeHtml(login.message || "等待扫码确认")}</p>
       </div>
     `;
+    slot.querySelector(".qr-refresh-btn")?.addEventListener("click", refreshLoginQr);
   } else {
     slot.innerHTML = `
       <div class="inline-login pending">
@@ -1834,6 +1851,19 @@ async function startLogin(accountIndex) {
     activeLoginIndex = null;
     renderLoginSlot({});
     throw error;
+  }
+}
+
+async function refreshLoginQr() {
+  const btn = document.querySelector(".qr-refresh-btn");
+  if (!btn || btn.classList.contains("is-refreshing")) return;
+  btn.classList.add("is-refreshing");
+  btn.innerHTML = `<div class="qr-loading"></div><span class="qr-refresh-hint">刷新中…</span>`;
+  btn.disabled = true;
+  try {
+    await api("/api/login/refresh", { method: "POST", body: "{}" });
+  } catch (error) {
+    showToast("刷新失败: " + error.message);
   }
 }
 

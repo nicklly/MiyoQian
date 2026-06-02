@@ -44,11 +44,12 @@ def ds_x4(query: str = "", body: str = "") -> str:
     return f"{t},{r},{sign}"
 
 
-def ds_k2(body: dict[str, Any]) -> str:
+def ds_app(body: str = "", query: str = "") -> str:
     t = str(int(time.time()))
-    r = "".join(random.choice(string.ascii_letters) for _ in range(6))
-    raw_body = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
-    sign = md5(f"salt={c.PASSPORT_K2_SALT}&t={t}&r={r}&b={raw_body}&q=")
+    r = str(random.randint(100001, 200000))
+    b = body if body else ""
+    q = query if query else ""
+    sign = md5(f"salt={c.PASSPORT_APP_SALT}&t={t}&r={r}&b={b}&q={q}")
     return f"{t},{r},{sign}"
 
 

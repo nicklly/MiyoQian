@@ -739,6 +739,53 @@ textarea:focus {
   image-rendering: pixelated;
 }
 
+.qr-refresh-btn {
+  position: relative;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  display: block;
+}
+
+.qr-refresh-btn img {
+  width: 150px;
+  height: 150px;
+  image-rendering: pixelated;
+  display: block;
+}
+
+.qr-refresh-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.qr-refresh-btn:hover .qr-refresh-hint {
+  opacity: 1;
+}
+
+.qr-refresh-btn.is-refreshing {
+  pointer-events: none;
+}
+
+.qr-refresh-btn.is-refreshing .qr-loading {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+
+.qr-refresh-btn.is-refreshing .qr-refresh-hint {
+  opacity: 1;
+}
+
 .inline-login.pending {
   grid-template-columns: 48px minmax(0, 1fr);
 }

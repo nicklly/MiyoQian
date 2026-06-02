@@ -20,7 +20,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import qrcode
 
-from ..auth.login import QRLogin
+from ..auth.login import QRLogin, _QrRefreshed
+from ..core import cookies
 from ..core.config import load_config, log_path, normalize_config, save_config, validate_unique_account_uids
 from ..core.http import ApiClient
 from ..core.logs import append_log, configure_logger, format_line, print_startup_banner
@@ -66,6 +67,9 @@ class WebApp:
         self.lock = threading.RLock()
         self.logs: list[str] = []
         self.login_state: dict[str, Any] = {"running": False, "status": "idle"}
+        self._qr_refresh = threading.Event()
+        self._login_cancel = threading.Event()
+        self._login_generation = 0
         self.scheduler = DailyScheduler(self.config, self.run_all, lambda message: self.log(message, "scheduler"))
         self.exchange_scheduler = ExchangeScheduler(
             self.config,
@@ -482,9 +486,13 @@ class WebApp:
                 "message": "正在生成二维码",
                 "qr": "",
             }
+            self._qr_refresh.clear()
+            self._login_cancel.clear()
+            self._login_generation += 1
+            generation = self._login_generation
         thread = threading.Thread(
             target=self._login_worker,
-            args=(account_index, timeout, account_snapshot, draft),
+            args=(account_index, timeout, account_snapshot, draft, generation),
             name="miyouqian-web-login",
             daemon=True,
         )
@@ -497,8 +505,11 @@ class WebApp:
         timeout: int,
         account_snapshot: dict[str, Any],
         draft: bool,
+        generation: int,
     ) -> None:
         try:
+            if self._login_cancel.is_set():
+                return
             with self.lock:
                 device = dict(self.config["device"])
                 account_name = display_account_name(account_snapshot)
@@ -516,10 +527,18 @@ class WebApp:
                         }
                     )
                 self.log(f"账号 {account_name} 等待扫码登录", "auth")
-                scan = login.wait(ticket, timeout=timeout)
+                scan = self._wait_with_refresh(login, ticket, timeout, account_name)
+                if self._login_cancel.is_set():
+                    return
                 with self.lock:
-                    self.login_state.update({"status": "exchanging", "message": "正在换取凭证"})
-                account_data = login.exchange_tokens(scan["uid"], scan["game_token"])
+                    self.login_state.update({"status": "exchanging", "message": "正在获取完整凭证"})
+                account_data = {**scan, **login.get_additional_tokens(scan["stoken"], scan["mid"])}
+                account_data["cookie"] = cookies.build_cookie(
+                    account_data["stuid"],
+                    account_data["mid"],
+                    account_data["ltoken"],
+                    account_data["cookie_token"],
+                )
             with self.lock:
                 new_uid = str(account_data.get("stuid") or "").strip()
                 duplicate = find_duplicate_uid(self.config.get("accounts") or [], new_uid, None if draft else account_index)
@@ -535,30 +554,78 @@ class WebApp:
                     configure_logger(self.log_file)
                     self.scheduler.reload(self.config)
                 account_name = display_account_name(account)
-                self.login_state.update(
-                    {
-                        "running": False,
-                        "status": "success",
-                        "message": f"账号 {account_name} 登录成功" + ("，请保存账号" if draft else ""),
-                        "qr": "",
-                        "account_data": account_data,
-                    }
-                )
+                if self._login_generation == generation:
+                    self.login_state.update(
+                        {
+                            "running": False,
+                            "status": "success",
+                            "message": f"账号 {account_name} 登录成功" + ("，请保存账号" if draft else ""),
+                            "qr": "",
+                            "account_data": account_data,
+                        }
+                    )
             if draft:
                 self.log(f"账号 {account_name} 登录成功，等待保存", "auth")
             else:
                 self.log(f"账号 {account_name} 登录成功，凭证已保存", "auth")
         except Exception as exc:
             with self.lock:
-                self.login_state.update(
-                    {
-                        "running": False,
-                        "status": "error",
-                        "message": str(exc),
-                        "qr": "",
-                    }
-                )
+                if self._login_generation == generation:
+                    self.login_state.update(
+                        {
+                            "running": False,
+                            "status": "error",
+                            "message": str(exc),
+                            "qr": "",
+                        }
+                    )
             self.log(f"扫码登录失败: {exc}", "auth")
+
+    def _wait_with_refresh(self, login: QRLogin, ticket: str, timeout: int, account_name: str) -> dict[str, str]:
+        while True:
+            if self._login_cancel.is_set():
+                raise RuntimeError("登录已取消")
+            try:
+                return login.wait(ticket, timeout=timeout, cancel=self._qr_refresh, cancel_events=[self._login_cancel])
+            except _QrRefreshed:
+                if self._login_cancel.is_set():
+                    raise RuntimeError("登录已取消")
+                self._qr_refresh.clear()
+                self.log(f"账号 {account_name} 刷新二维码", "auth")
+                url, ticket = login.fetch()
+                qr = make_qr_data_uri(url)
+                with self.lock:
+                    self.login_state.update(
+                        {
+                            "status": "waiting",
+                            "message": "等待扫码确认",
+                            "qr": qr,
+                            "qr_url": url,
+                        }
+                    )
+
+    def refresh_login_qr(self) -> None:
+        with self.lock:
+            if not self.login_state.get("running"):
+                raise RuntimeError("当前没有进行中的登录")
+            if self.login_state.get("status") != "waiting":
+                raise RuntimeError("当前不在等待扫码状态")
+        self._qr_refresh.set()
+
+    def cancel_login(self) -> None:
+        with self.lock:
+            if not self.login_state.get("running"):
+                raise RuntimeError("当前没有进行中的登录")
+            self.login_state.update(
+                {
+                    "running": False,
+                    "status": "error",
+                    "message": "登录流程已取消",
+                    "qr": "",
+                }
+            )
+        self._login_cancel.set()
+        self.log("登录流程已取消", "auth")
 
 
 def make_qr_data_uri(text: str) -> str:
@@ -818,6 +885,14 @@ class Handler(BaseHTTPRequestHandler):
                 if account_payload is not None and not isinstance(account_payload, dict):
                     raise ValueError("账号数据必须是 JSON 对象")
                 self.app.start_login(account_index, timeout, account_payload, bool(payload.get("draft")))
+                self.send_json({"ok": True})
+                return
+            if path == "/api/login/refresh":
+                self.app.refresh_login_qr()
+                self.send_json({"ok": True})
+                return
+            if path == "/api/login/cancel":
+                self.app.cancel_login()
                 self.send_json({"ok": True})
                 return
             if path == "/api/shop/exchange":

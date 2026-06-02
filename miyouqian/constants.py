@@ -3,15 +3,16 @@
 
 BBS_VERSION = "2.99.1"
 QR_LOGIN_VERSION = "2.102.1"
+PASSPORT_APP_VERSION = "2.90.1"
 
 BBS_SALT = "b0EofkfMKq2saWV9fwux18J5vzcFTlex"
 BBS_WEB_SALT = "DlOUwIupfU6YespEUWDJmXtutuXV6owG"
 BBS_X6_SALT = "t0qEgfub6cvueAPgR5m9aQWWVciEer7v"
 PASSPORT_X4_SALT = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
-PASSPORT_K2_SALT = "OvOIsZRXrUbXoUlpQuhEx4tgAwNVUMmp"
+PASSPORT_APP_SALT = "dDIQHbKOdaPaLuvQKVzUzqdeCaxjtaPV"
 
 PASSPORT_APP_ID = "bll8iq97cem8"
-QRCODE_APP_ID = "7"
+QRCODE_APP_APP_ID = "ddxf5dufpuyo"
 
 TAKUMI_API = "https://api-takumi.mihoyo.com"
 BBS_API = "https://bbs-api.miyoushe.com"
@@ -44,11 +45,8 @@ MALL_EXCHANGE_URL = "https://api-takumi.miyoushe.com/mall/v1/web/goods/exchange"
 MALL_ADDRESS_URL = f"{TAKUMI_API}/account/address/list"
 DEVICE_FP_URL = "https://public-data-api.mihoyo.com/device-fp/api/getFp"
 
-QRCODE_FETCH_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/fetch"
-QRCODE_QUERY_URL = "https://hk4e-sdk.mihoyo.com/hk4e_cn/combo/panda/qrcode/query"
-TOKEN_BY_GAME_TOKEN_URL = (
-    f"{TAKUMI_API}/account/ma-cn-session/app/getTokenByGameToken"
-)
+QRCODE_FETCH_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/createQRLogin"
+QRCODE_QUERY_URL = f"{PASSPORT_API}/account/ma-cn-passport/app/queryQRLoginStatus"
 LTOKEN_BY_STOKEN_URL = f"{PASSPORT_API}/account/auth/api/getLTokenBySToken"
 COOKIE_TOKEN_BY_STOKEN_URL = (
     f"{PASSPORT_API}/account/auth/api/getCookieAccountInfoBySToken"
@@ -64,6 +62,8 @@ DEFAULT_MOBILE_UA = (
 QR_MOBILE_UA = (
     f"Mozilla/5.0 (Linux; Android 12) Mobile miHoYoBBS/{QR_LOGIN_VERSION}"
 )
+
+PASSPORT_APP_UA = f"Mozilla/5.0 miHoYoBBS/{PASSPORT_APP_VERSION} Capture/2.2.0"
 
 GAMES = {
     "genshin": {

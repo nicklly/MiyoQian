@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import threading
 import time
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -14,6 +15,10 @@ from ..core import cookies, crypto
 from ..core.http import ApiClient
 
 
+class _QrRefreshed(Exception):
+    pass
+
+
 class QRLogin:
     def __init__(self, client: ApiClient, device_id: str, device_fp: str) -> None:
         self.client = client
@@ -21,83 +26,85 @@ class QRLogin:
         self.device_fp = device_fp
 
     def fetch(self) -> tuple[str, str]:
+        body = "{}"
         data = self.client.post_json(
             c.QRCODE_FETCH_URL,
-            json={"app_id": c.QRCODE_APP_ID, "device": self.device_id},
+            json={},
+            headers=self._headers(body),
         )
         ensure_ok(data, "生成二维码失败")
-        url = str(data["data"]["url"])
-        ticket = parse_qs(urlparse(url).query).get("ticket", [""])[0]
-        if not ticket:
-            raise RuntimeError("二维码接口未返回 ticket")
+        url = str(data.get("data", {}).get("url", ""))
+        ticket = str(data.get("data", {}).get("ticket", ""))
+        if not url or not ticket:
+            raise RuntimeError("二维码接口未返回 url/ticket")
         return url, ticket
 
-    def wait(self, ticket: str, timeout: int = 120) -> dict[str, str]:
+    def wait(self, ticket: str, timeout: int = 120, cancel: threading.Event | None = None, cancel_events: list[threading.Event] | None = None) -> dict[str, str]:
         started = time.time()
         last_status = ""
         while time.time() - started < timeout:
+            events = list(cancel_events or [])
+            if cancel is not None:
+                events.append(cancel)
+            for event in events:
+                if event.is_set():
+                    raise _QrRefreshed()
+            body = json.dumps({"ticket": ticket}, separators=(",", ":"))
             data = self.client.post_json(
                 c.QRCODE_QUERY_URL,
-                json={"app_id": c.QRCODE_APP_ID, "device": self.device_id, "ticket": ticket},
+                json={"ticket": ticket},
+                headers=self._headers(body),
             )
             ensure_ok(data, "查询二维码状态失败")
-            status = str(data.get("data", {}).get("stat", ""))
+            status_data = data.get("data", {})
+            status = str(status_data.get("status", ""))
             if status != last_status:
                 if status == "Init":
                     print("等待扫码...")
                 elif status == "Scanned":
                     print("已扫码，请在米游社 APP 确认登录。")
                 elif status == "Confirmed":
-                    print("已确认，正在换取凭证。")
+                    print("已确认，正在获取凭证。")
                 last_status = status
             if status == "Confirmed":
-                raw = data.get("data", {}).get("payload", {}).get("raw", "{}")
-                payload = json.loads(raw)
-                uid = str(payload.get("uid") or "")
-                game_token = str(payload.get("token") or "")
-                if not uid or not game_token:
-                    raise RuntimeError("扫码结果缺少 uid/game_token")
-                return {"uid": uid, "game_token": game_token}
+                user_info = status_data.get("user_info", {})
+                mid = str(user_info.get("mid") or "")
+                aid = str(user_info.get("aid") or "")
+                tokens = status_data.get("tokens", [])
+                stoken = str(tokens[0].get("token") or "") if tokens else ""
+                if not stoken or not mid or not aid:
+                    raise RuntimeError("扫码结果缺少 stoken/mid/aid")
+                return {"stoken": stoken, "mid": mid, "stuid": aid}
             time.sleep(2)
         raise TimeoutError("扫码登录超时")
 
-    def exchange_tokens(self, uid: str, game_token: str) -> dict[str, str]:
-        body = {"account_id": int(uid), "game_token": game_token}
-        data = self.client.post_json(
-            c.TOKEN_BY_GAME_TOKEN_URL,
-            json=body,
-            headers={
-                "x-rpc-app_id": c.PASSPORT_APP_ID,
-                "x-rpc-client_type": "2",
-                "x-rpc-game_biz": "bbs_cn",
-                "x-rpc-device_id": self.device_id,
-                "x-rpc-device_fp": self.device_fp,
-                "ds": crypto.ds_k2(body),
-                "user-agent": c.QR_MOBILE_UA,
-                "content-type": "application/json",
-            },
-        )
-        ensure_ok(data, "game_token 换 stoken 失败")
-        token_info = data.get("data", {}).get("token", {})
-        user_info = data.get("data", {}).get("user_info", {})
-        stoken = str(token_info.get("token") or "")
-        mid = str(user_info.get("mid") or "")
-        stuid = str(user_info.get("aid") or uid)
-        if not stoken or not mid:
-            raise RuntimeError("接口未返回 stoken/mid")
+    def _headers(self, body: str) -> dict[str, str]:
+        return {
+            "User-Agent": c.PASSPORT_APP_UA,
+            "Accept": "*/*",
+            "Accept-Language": "zh-cn",
+            "x-rpc-client_type": "3",
+            "x-rpc-app_version": c.PASSPORT_APP_VERSION,
+            "x-rpc-device_id": self.device_id,
+            "x-rpc-device_fp": self.device_fp,
+            "x-rpc-game_biz": "bbs_cn",
+            "x-rpc-app_id": c.QRCODE_APP_APP_ID,
+            "x-rpc-sdk_version": c.PASSPORT_APP_VERSION,
+            "x-rpc-account_version": c.PASSPORT_APP_VERSION,
+            "x-rpc-device_model": "Mi 14",
+            "x-rpc-device_name": "Mihoyo Capture",
+            "DS": crypto.ds_app(body=body),
+            "Content-Type": "application/json",
+        }
+
+    def get_additional_tokens(self, stoken: str, mid: str) -> dict[str, str]:
         ltoken = self._get_ltoken(stoken, mid)
         cookie_token = self._get_cookie_token(stoken, mid)
-        cookie = cookies.build_cookie(stuid, mid, ltoken, cookie_token)
-        return {
-            "stuid": stuid,
-            "stoken": stoken,
-            "mid": mid,
-            "cookie": cookie,
-        }
+        return {"ltoken": ltoken, "cookie_token": cookie_token}
 
     def _passport_headers(self, stoken: str, mid: str) -> dict[str, str]:
         return {
-            "user-agent": c.QR_MOBILE_UA,
+            "user-agent": c.PASSPORT_APP_UA,
             "x-rpc-app_version": c.QR_LOGIN_VERSION,
             "x-rpc-client_type": "5",
             "x-requested-with": "com.mihoyo.hyperion",
