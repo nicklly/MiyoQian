@@ -1245,8 +1245,10 @@ async function addShopPlan(good) {
   } else {
     config.shop_exchange.plans.push(plan);
   }
+  const planIndex = config.shop_exchange.plans.length - 1;
   renderShopPlans();
-  loadAllPlanAddresses();
+  // 只为新添加的计划加载地址并自动填充
+  await refreshShopPlanAddresses(planIndex, true);
   saveConfig("已加入兑换计划").catch((error) => showToast(error.message));
 }
 
@@ -1392,7 +1394,7 @@ async function refreshShopPlanRole(index) {
   showToast("游戏角色已更新");
 }
 
-async function refreshShopPlanAddresses(index) {
+async function refreshShopPlanAddresses(index, autoFill = false) {
   const plan = config.shop_exchange?.plans?.[index];
   if (!plan || Number(plan.type || 0) === 2) return;
   const accountIndex = Number(plan.account_index || 0);
@@ -1410,10 +1412,15 @@ async function refreshShopPlanAddresses(index) {
     const addresses = meta.addresses || [];
     shopPlanAddressCache.set(accountIndex, addresses);
     select.innerHTML = buildAddressOptions(addresses, currentValue);
-    if (!currentValue && addresses.length) {
+    // 只在 autoFill=true 时自动填充第一个地址
+    if (autoFill && !currentValue && addresses.length) {
       const firstId = String(addresses[0].id || "");
       select.value = firstId;
       plan.address_id = firstId;
+    } else if (!autoFill && !currentValue && addresses.length) {
+      // 不自动填充时，只在UI上选择第一个作为默认显示
+      const firstId = String(addresses[0].id || "");
+      select.value = firstId;
     } else if (currentValue && !addresses.some((a) => String(a.id) === currentValue)) {
       select.innerHTML =
         `<option value="${escapeAttr(currentValue)}">${escapeHtml(currentValue)}（已失效）</option>` +
@@ -1431,9 +1438,11 @@ function shopPlanAddressSelectHtml(plan) {
   const accountIndex = Number(plan.account_index || 0);
   const cached = shopPlanAddressCache.get(accountIndex);
   if (!cached) return `<option value="">加载中...</option>`;
-  if (!plan.address_id && cached.length) {
-    plan.address_id = String(cached[0].id || "");
-  }
+  // 不再自动修改 plan.address_id
+  // 如果 plan.address_id 为空，UI上可以选择第一个，但不写入配置
+  // if (!plan.address_id && cached.length) {
+  //   plan.address_id = String(cached[0].id || "");
+  // }
   return buildAddressOptions(cached, plan.address_id || "");
 }
 
@@ -1450,14 +1459,17 @@ function buildAddressOptions(addresses, selectedId) {
   return options.join("");
 }
 
-async function loadAllPlanAddresses() {
+async function loadAllPlanAddresses({ autoFill = false } = {}) {
   const plans = config.shop_exchange?.plans || [];
   const tasks = [];
   for (let i = 0; i < plans.length; i++) {
-    tasks.push(refreshShopPlanAddresses(i).catch(() => {}));
+    tasks.push(refreshShopPlanAddresses(i, autoFill).catch(() => {}));
   }
   await Promise.all(tasks);
-  autoSaveConfig().catch(() => {});
+  // 只在需要自动填充时才保存配置
+  if (autoFill) {
+    autoSaveConfig().catch(() => {});
+  }
 }
 
 function shopRoleDisplay(plan) {
