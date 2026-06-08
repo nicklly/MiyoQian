@@ -257,7 +257,7 @@ docker compose up -d --build
 > 容器首次启动时会自动从 `config.example.yaml` 生成 `config.yaml`，无需手动操作。
 > 容器内服务已默认监听 `0.0.0.0`（Docker 必需），宿主机通过 `localhost:5890` 访问即可。
 
-#### 4. 常用命令
+#### 3. 常用命令
 
 ```bash
 cd docker
@@ -272,23 +272,29 @@ docker compose down
 docker compose up -d --build
 ```
 
-#### 5. 数据持久化
+#### 4. 数据持久化
 
-`docker-compose.yml` 已配置以下目录的持久化映射：
+`docker-compose.yml` 默认使用 Docker 命名卷保存容器专用数据，不再和项目根目录的 `config.yaml`、`data/`、`logs/` 共用：
 
-| 宿主机路径 | 容器路径 | 说明 |
+| Docker 卷 | 容器路径 | 说明 |
 | --- | --- | --- |
-| `config.yaml` | `/app/config.yaml` | 配置文件 |
-| `data/` | `/app/data/` | 登录凭证（敏感） |
-| `logs/` | `/app/logs/` | 运行日志 |
+| `docker_miyouqian_state` | `/app/state` | Docker 专用配置、登录凭证和运行日志 |
 
-容器重建后数据不会丢失。
+容器重建后数据不会丢失。只有执行 `docker compose down -v` 或手动删除该 Docker 卷时，Docker 环境内的配置和登录凭证才会被删除。
+
+如需查看或备份容器内配置，可以执行：
+
+```bash
+docker compose exec miyouqian sh
+ls -la /app/state
+```
 
 #### 注意事项
 
 - 容器内时区默认为 `Asia/Shanghai`，如需修改可在 `docker-compose.yml` 中调整 `TZ` 环境变量
-- 如需修改端口，同时修改 `docker-compose.yml` 的 `ports` 和 `config.yaml` 的 `web.port`
-- 公网访问需要在宿主机层面配置（开放防火墙端口、反向代理等），首次访问时页面会引导设置密码
+- 默认映射到宿主机所有网卡的 `5890` 端口，局域网或公网访问还需要在宿主机层面配置防火墙、安全组、端口转发或反向代理
+- 如需修改容器内监听端口，同时修改 `docker-compose.yml` 的 `ports` 和 Docker 启动命令中的 `--port`
+- 公网访问时请务必设置 Web 控制台密码，首次访问页面会引导设置密码
 
 ---
 

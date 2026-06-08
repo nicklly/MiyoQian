@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   miyouqian:
     build:
@@ -7,14 +5,21 @@ services:
       dockerfile: docker/Dockerfile
     container_name: miyouqian
     restart: unless-stopped
+    init: true
     ports:
       - "5890:5890"
     volumes:
-      # 配置文件（首次启动会自动生成，也可以从宿主机挂载）
-      - ../config.yaml:/app/config.yaml
-      # 登录凭证（敏感信息，必须持久化）
-      - ../data:/app/data
-      # 日志
-      - ../logs:/app/logs
+      # Docker 专用状态卷：配置、登录凭证和日志均保存在容器隔离环境中
+      - miyouqian_state:/app/state
     environment:
       - TZ=Asia/Shanghai
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  miyouqian_state:
