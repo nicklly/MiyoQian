@@ -52,10 +52,13 @@ def passport_rsa_encrypt(text: str) -> str:
 
 
 class PassportLogin:
-    def __init__(self, client: ApiClient, device_id: str, device_fp: str) -> None:
+    def __init__(self, client: ApiClient, device_id: str, device_fp: str,
+                 device_model: str = "Mi 14", device_name: str = "Mihoyo Capture") -> None:
         self.client = client
         self.device_id = device_id
         self.device_fp = device_fp
+        self.device_model = device_model
+        self.device_name = device_name
 
     def get_additional_tokens(self, stoken: str, mid: str) -> dict[str, str]:
         ltoken = self._get_ltoken(stoken, mid)
@@ -88,6 +91,8 @@ class PassportLogin:
     def _get_cookie_token(self, stoken: str, mid: str) -> str:
         headers = self._passport_headers(stoken, mid)
         headers["ds"] = crypto.ds_x4(query=f"stoken={stoken}")
+        headers["x-rpc-client_type"] = "2"
+        headers["x-rpc-aigis"] = ""
         data = self.client.get_json(
             c.COOKIE_TOKEN_BY_STOKEN_URL,
             headers=headers,
@@ -161,13 +166,13 @@ class QRLogin(PassportLogin):
             "x-rpc-device_id": self.device_id,
             "x-rpc-device_fp": self.device_fp,
             "x-rpc-game_biz": "bbs_cn",
-            "x-rpc-app_id": c.QRCODE_APP_APP_ID,
+            "x-rpc-app_id": c.PASSPORT_APP_ID,
             "x-rpc-sdk_version": c.PASSPORT_APP_VERSION,
+            "x-rpc-device_model": self.device_model,
+            "x-rpc-device_name": self.device_name,
             "x-rpc-account_version": c.PASSPORT_APP_VERSION,
-            "x-rpc-device_model": "Mi 14",
-            "x-rpc-device_name": "Mihoyo Capture",
-            "DS": crypto.ds_app(body=body),
-            "Content-Type": "application/json",
+            "DS": crypto.ds_x4(body=body),
+            "Content-Type": "application/json; charset=UTF-8",
         }
 
 class CaptchaLogin(PassportLogin):
@@ -221,9 +226,9 @@ class CaptchaLogin(PassportLogin):
             "x-rpc-client_type": "2",
             "x-rpc-app_id": c.PASSPORT_APP_ID,
             "x-rpc-device_fp": self.device_fp,
-            "x-rpc-device_name": "Mihoyo Capture",
+            "x-rpc-device_name": self.device_name,
             "x-rpc-device_id": self.device_id,
-            "x-rpc-device_model": "Mi 14",
+            "x-rpc-device_model": self.device_model,
             "user-agent": f"Mozilla/5.0 (Linux; Android 12) Mobile miHoYoBBS/{c.BBS_VERSION}",
             "content-type": "application/json",
         }

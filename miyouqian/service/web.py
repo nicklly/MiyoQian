@@ -514,7 +514,9 @@ class WebApp:
                 raise RuntimeError("扫码登录正在进行")
             device = dict(self.config["device"])
         with ApiClient() as client:
-            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]))
+            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]),
+                                 str(device.get("model") or "Mi 14"),
+                                 str(device.get("name") or "Mihoyo Capture"))
             result = login.create_captcha(phone, aigis)
         self.log(f"账号 {account_name} 已发送验证码", "auth")
         return result
@@ -542,7 +544,9 @@ class WebApp:
                 raise RuntimeError("扫码登录正在进行")
             device = dict(self.config["device"])
         with ApiClient() as client:
-            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]))
+            login = CaptchaLogin(client, str(device["id"]), str(device["fp"]),
+                                 str(device.get("model") or "Mi 14"),
+                                 str(device.get("name") or "Mihoyo Capture"))
             token_data = login.login_by_mobile_captcha(phone, captcha, action_type, aigis)
             account_data = self._complete_login_data(login, token_data)
         account = self._save_login_account(account_index, account_snapshot, account_data, draft)
@@ -622,7 +626,9 @@ class WebApp:
                 device = dict(self.config["device"])
                 account_name = display_account_name(account_snapshot)
             with ApiClient() as client:
-                login = QRLogin(client, str(device["id"]), str(device["fp"]))
+                login = QRLogin(client, str(device["id"]), str(device["fp"]),
+                               str(device.get("model") or "Mi 14"),
+                               str(device.get("name") or "Mihoyo Capture"))
                 url, ticket = login.fetch()
                 qr = make_qr_data_uri(url)
                 with self.lock:

@@ -85,7 +85,9 @@ def command_login(config_path: pathlib.Path, account_name: str, timeout: int, sa
     device = config["device"]
     image_path = config_path.parent / "qrcode.png" if save_image else None
     with ApiClient() as client:
-        login = QRLogin(client, str(device["id"]), str(device["fp"]))
+        login = QRLogin(client, str(device["id"]), str(device["fp"]),
+                         str(device.get("model") or "Mi 14"),
+                         str(device.get("name") or "Mihoyo Capture"))
         url, ticket = login.fetch()
         print("请用米游社 APP 扫码：我的 -> 左上角扫一扫")
         print_qrcode(url, image_path=image_path)

@@ -1973,9 +1973,9 @@ function renderLocalLoginPanel(slot, panel) {
     slot.innerHTML = `
       <div class="inline-login login-method-panel">
         <div class="login-method-actions">
-          <button class="primary" type="button" data-login-method-captcha>
+          <button class="ghost" type="button" data-login-method-captcha>
             <svg><use href="#i-phone"></use></svg>
-            <span>验证码登录（推荐）</span>
+            <span>验证码登录</span>
           </button>
           <button class="ghost" type="button" data-login-method-scan>
             <svg><use href="#i-qr"></use></svg>
@@ -2196,13 +2196,6 @@ function updateLoginCountdownView(panel) {
 }
 
 async function confirmScanLogin(accountIndex) {
-  const confirmed = window.confirm(
-    "当前登录方式权限受限，无法进行社区签到，其他功能正常，是否采用这种方式登录",
-  );
-  if (!confirmed) {
-    resetLoginPanel();
-    return;
-  }
   clearLoginCountdown();
   localLoginPanel = null;
   await startLogin(accountIndex);
