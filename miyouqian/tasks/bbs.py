@@ -127,12 +127,10 @@ class BbsTasks:
             "x-rpc-device_model": str(self.device.get("model") or "Mi 6"),
             "x-rpc-h265_supported": "1",
             "Referer": "https://app.mihoyo.com",
-            "x-rpc-verify_key": c.PASSPORT_APP_ID,
-            "x-rpc-csm_source": "discussion",
             "Content-Type": "application/json; charset=UTF-8",
             "Host": "bbs-api.miyoushe.com",
-            "Connection": "Keep-Alive",
-            "Accept-Encoding": "gzip",
+            "x-rpc-verify_key": c.PASSPORT_APP_ID,
+            "x-rpc-csm_source": "home",
             "User-Agent": "okhttp/4.9.3",
         }
         if self.device.get("fp"):
@@ -220,12 +218,13 @@ class BbsTasks:
             self._sleep()
         return {"messages": messages, "success": success, "failed": failed}
 
-    def _posts(self) -> list[tuple[str, str]]:
+    def _posts(self) -> list[tuple[str, str, str]]:
         forums = [c.BBS_FORUMS.get(int(i)) for i in self.bbs_config.get("forums", [5, 2])]
         forums = [forum for forum in forums if forum]
         if not forums:
             return []
         forum = forums[0]
+        gids = forum["id"]
         data = self.client.get_json(
             c.BBS_POST_LIST_URL,
             params={
@@ -238,21 +237,21 @@ class BbsTasks:
             headers=self._headers(),
         )
         raw_posts = data.get("data", {}).get("list", []) if data.get("retcode") == 0 else []
-        posts: list[tuple[str, str]] = []
+        posts: list[tuple[str, str, str]] = []
         for item in raw_posts:
             post = item.get("post", {})
             post_id = str(post.get("post_id") or "")
             title = str(post.get("subject") or post_id)
             if post_id:
-                posts.append((post_id, title))
+                posts.append((post_id, title, gids))
         random.shuffle(posts)
         return posts[: int(self.bbs_config.get("post_limit") or 5)]
 
-    def _read(self, posts: list[tuple[str, str]]) -> dict[str, list[str]]:
+    def _read(self, posts: list[tuple[str, str, str]]) -> dict[str, list[str]]:
         messages: list[str] = []
         success: list[str] = []
         failed: list[str] = []
-        for post_id, title in posts:
+        for post_id, title, _gids in posts:
             self._add(messages, f"正在浏览: {title}")
             data = self.client.get_json(c.BBS_DETAIL_URL, params={"post_id": post_id}, headers=self._headers())
             if data.get("message") == "OK":
@@ -265,15 +264,15 @@ class BbsTasks:
             self._sleep()
         return {"messages": messages, "success": success, "failed": failed}
 
-    def _like(self, posts: list[tuple[str, str]]) -> dict[str, list[str]]:
+    def _like(self, posts: list[tuple[str, str, str]]) -> dict[str, list[str]]:
         messages: list[str] = []
         success: list[str] = []
         failed: list[str] = []
-        for post_id, title in posts:
+        for post_id, title, gids in posts:
             self._add(messages, f"正在点赞: {title}")
             data = self.client.post_json(
                 c.BBS_LIKE_URL,
-                json={"post_id": post_id, "is_cancel": False},
+                json={"post_id": post_id, "is_cancel": False, "gids": gids},
                 headers=self._headers(),
             )
             if data.get("message") == "OK":
@@ -284,14 +283,14 @@ class BbsTasks:
                     self._add(messages, f"正在取消点赞: {title}")
                     self.client.post_json(
                         c.BBS_LIKE_URL,
-                        json={"post_id": post_id, "is_cancel": True},
+                        json={"post_id": post_id, "is_cancel": True, "gids": gids},
                         headers=self._headers(),
                     )
             elif data.get("retcode") == 1034:
                 retry_data = self._retry_bbs_captcha_request(
                     messages,
                     "点赞",
-                    lambda challenge: self._like_once(post_id, challenge),
+                    lambda challenge: self._like_once(post_id, gids, challenge),
                 )
                 if retry_data.get("message") == "OK":
                     self._add(messages, f"点赞成功: {title}")
@@ -301,7 +300,7 @@ class BbsTasks:
                         self._add(messages, f"正在取消点赞: {title}")
                         self.client.post_json(
                             c.BBS_LIKE_URL,
-                            json={"post_id": post_id, "is_cancel": True},
+                            json={"post_id": post_id, "is_cancel": True, "gids": gids},
                             headers=self._headers(),
                         )
                 elif not captcha.is_enabled(self.config):
@@ -318,16 +317,16 @@ class BbsTasks:
             self._sleep()
         return {"messages": messages, "success": success, "failed": failed}
 
-    def _share(self, posts: list[tuple[str, str]]) -> dict[str, list[str]]:
+    def _share(self, posts: list[tuple[str, str, str]]) -> dict[str, list[str]]:
         messages: list[str] = []
         success: list[str] = []
         failed: list[str] = []
-        for post_id, title in posts:
+        for post_id, title, _gids in posts:
             self._add(messages, f"正在分享: {title}")
             data = self.client.get_json(
                 c.BBS_SHARE_URL,
                 params={"entity_id": post_id, "entity_type": 1},
-                headers=self._headers(),
+                headers=self._web_headers(),
             )
             if data.get("message") == "OK":
                 self._add(messages, f"分享成功: {title}")
@@ -350,12 +349,12 @@ class BbsTasks:
         headers["DS"] = crypto.ds_x6(body=body)
         return self.client.post_json(c.BBS_SIGN_URL, content=body, headers=headers)
 
-    def _like_once(self, post_id: str, challenge: str) -> dict[str, Any]:
+    def _like_once(self, post_id: str, gids: str, challenge: str) -> dict[str, Any]:
         headers = self._headers()
         headers["x-rpc-challenge"] = challenge
         return self.client.post_json(
             c.BBS_LIKE_URL,
-            json={"post_id": post_id, "is_cancel": False},
+            json={"post_id": post_id, "is_cancel": False, "gids": gids},
             headers=headers,
         )
 
