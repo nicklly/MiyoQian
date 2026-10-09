@@ -182,6 +182,17 @@ def normalize_config(config: dict[str, Any]) -> None:
         bbs = {}
         config["bbs"] = bbs
     bbs["checkin"] = parse_bool(bbs.get("checkin", True))
+    raw_forums = bbs.get("forums")
+    if isinstance(raw_forums, list):
+        forums: list[int] = []
+        for item in raw_forums:
+            try:
+                forums.append(int(item))
+            except (TypeError, ValueError):
+                continue
+    else:
+        forums = list(DEFAULT_CONFIG["bbs"]["forums"])
+    bbs["forums"] = forums
     bbs["read"] = False
     bbs["like"] = False
     bbs["share"] = False
@@ -270,7 +281,7 @@ PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
     "qq": ("push_url", "access_token", "send_id", "msg_type"),
     "telegram": ("token", "chat_id"),
     "dingrobot": ("webhook", "secret"),
-    "feishubot": ("webhook",),
+    "feishubot": ("webhook", "secret"),
     "email": ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "mail_from", "mail_to", "smtp_ssl"),
 }
 

@@ -30,7 +30,16 @@ const pushChannelOptions = [
 const captchaChannelOptions = [["damagou", "打码狗(成本≈0.01元/次)"]];
 const bbsInteractionDisabledReason =
   "米游社改版，社区互动已无法获取米游币，待新获取方式更新~";
-
+const bbsForumOptions = [
+  ["5", "大别野"],
+  ["2", "原神"],
+  ["6", "崩坏：星穹铁道"],
+  ["8", "绝区零"],
+  ["1", "崩坏3"],
+  ["3", "崩坏学园2"],
+  ["4", "未定事件簿"],
+];
+const defaultBbsForums = ["5", "2"];
 let config = null;
 let toastTimer = null;
 let autoSaveTimer = null;
@@ -126,6 +135,7 @@ function renderConfig() {
   $("pushErrorOnly").checked = Boolean(config.push?.error_only ?? false);
   $("captchaMaxRetries").value = config.captcha?.max_retries ?? 3;
   renderGames();
+  renderBbsForums();
   renderCloudGames();
   renderPushChannels();
   renderCaptchaChannels();
@@ -165,16 +175,37 @@ function renderCloudGames() {
   updateTaskDependencyState();
 }
 
+function renderBbsForums() {
+  const enabled = new Set(
+      (config.bbs?.forums || defaultBbsForums).map((id) => String(id)),
+  );
+  $("bbsForumChips").innerHTML = bbsForumOptions
+      .map(
+          ([key, label]) => `
+        <label class="chip">
+          <input type="checkbox" data-bbs-forum="${key}" data-autosave ${enabled.has(key) ? "checked" : ""} />
+          <span>${label}</span>
+        </label>
+      `,
+      )
+      .join("");
+  updateTaskDependencyState();
+}
+
 function updateTaskDependencyState() {
   const gameEnabled = $("gameCheckin").checked;
   const cloudEnabled = $("cloudGameCheckin").checked;
   const bbsEnabled = $("bbsTasks").checked;
+  const bbsCheckinEnabled = bbsEnabled && $("bbsCheckin").checked;
+  $("bbsForumChips").classList.toggle("is-hidden", !bbsCheckinEnabled);
+  setTaskGroupDisabled("bbsTaskGroup", "[data-bbs-forum]", !bbsCheckinEnabled);
   setTaskGroupDisabled("gameTaskGroup", "[data-game]", !gameEnabled);
   setTaskGroupDisabled(
     "cloudGameTaskGroup",
     "[data-cloud-game]:not([data-cloud-game-disabled])",
     !cloudEnabled,
   );
+
   updateAccountCloudGameInputs();
   setTaskGroupDisabled(
     "bbsTaskGroup",
@@ -381,7 +412,7 @@ function pushChannelFields(provider, channel) {
       field("webhook", "Webhook", "password"),
       field("secret", "加签 Secret", "password"),
     ],
-    feishubot: [field("webhook", "Webhook", "password")],
+    feishubot: [field("webhook", "Webhook", "password"),field("secret", "Secret", "password")],
     email: [
       field("smtp_host", "SMTP 服务器"),
       field("smtp_port", "SMTP 端口", "number"),
@@ -461,7 +492,7 @@ function pushChannelFieldNames(provider) {
     qq: ["push_url", "access_token", "send_id", "msg_type"],
     telegram: ["token", "chat_id"],
     dingrobot: ["webhook", "secret"],
-    feishubot: ["webhook"],
+    feishubot: ["webhook", "secret"],
     email: [
       "smtp_host",
       "smtp_port",
@@ -893,6 +924,9 @@ function collectConfig() {
   config.bbs = {
     ...(config.bbs || {}),
     checkin: $("bbsCheckin").checked,
+    forums: Array.from(
+        document.querySelectorAll("[data-bbs-forum]:checked"),
+    ).map((input) => Number(input.dataset.bbsForum)),
     read: false,
     like: false,
     share: false,
@@ -2989,7 +3023,8 @@ function bindEvents() {
       if (
         event.target.id === "gameCheckin" ||
         event.target.id === "cloudGameCheckin" ||
-        event.target.id === "bbsTasks"
+        event.target.id === "bbsTasks" ||
+        event.target.id === "bbsCheckin"
       ) {
         updateTaskDependencyState();
       }

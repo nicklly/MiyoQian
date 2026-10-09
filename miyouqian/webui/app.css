@@ -514,6 +514,9 @@ textarea:focus {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 14px;
 }
+.form-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 
 .form-grid.compact {
   margin-top: 12px;
@@ -522,6 +525,18 @@ textarea:focus {
 .task-group {
   display: grid;
   gap: 12px;
+}
+
+#bbsTaskGroup {
+  gap: 10px;
+}
+
+#bbsTaskGroup .form-grid.compact {
+  margin-top: 0;
+}
+
+.chips.compact {
+  margin-top: 0;
 }
 
 .task-group + .task-group {
@@ -1383,6 +1398,7 @@ textarea:focus {
   .app-layout,
   .shop-layout,
   .form-grid.two,
+  .form-grid.three,
   .form-grid.four {
     grid-template-columns: 1fr;
   }
