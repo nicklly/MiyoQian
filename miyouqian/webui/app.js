@@ -29,6 +29,7 @@ const pushChannelOptions = [
   ["qq", "QQ推送"],
   ["qqbot", "QQ机器人（QQ开放平台）"],
   ["gotify", "Gotify"],
+  ["meow", "MeoW"],
 ];
 
 // 通道图标放在 /assets/push/，文件名和通道 provider 一一对应
@@ -43,6 +44,7 @@ const pushChannelIconFiles = {
   qq: "qq.svg",
   qqbot: "qqbot.svg",
   gotify: "gotify.png",
+  meow: "meow.png",
 };
 
 // 通道字段的默认值：取值等于默认值不算「已配置」。
@@ -117,6 +119,16 @@ let logsPinnedToBottom = true;
 let activeView = "dashboard";
 const ACCOUNTS_VISIBLE = 3;      // 账号栏最多同时露出几个账号，其余在列表里滚动
 const PANEL_STATE_KEY = "miyouqian.panels";
+const GITHUB_REPO_URL = "https://github.com/Marchen-orz/MiyoQian";
+const STAR_PROMPT_KEY = "miyouqian.starPrompt";
+const STAR_FIRST_CHECKIN_DELAY_MS = 1500;           // 首次执行签到完成后延迟 1.5 秒弹出
+const STAR_REVISIT_DELAY_MS = 30 * 1000;            // 后续下次进入管理界面延迟 30 秒弹出
+const STAR_MIN_REVISIT_GAP_MS = 5 * 60 * 1000;      // 防抖：刚关闭后短时间内刷新页面不重复弹
+let starPromptTimer = null;
+let starPromptShownThisVisit = false;
+let starPromptStatusInitialized = false;
+let lastSchedulerRunning = false;
+let lastSchedulerRunAt = "";
 const LOG_PANEL_GAP = 24;        // 日志栏贴着窗口底部时留的边距
 const LOG_PANEL_TOP = 16;        // 同 CSS 里 .side-column 的 sticky top
 let logFitQueued = false;
@@ -127,6 +139,12 @@ let deviceInfo = null;           // GET /api/device 的结果，没取到是 nul
 let deviceError = "";            // 读取设备信息失败的原因
 let deviceBusy = "";             // 正在进行的操作（fp / import / reset），空表示空闲
 let deviceImportDraft = "";      // 导入框里还没提交的文字，面板重绘时保留
+let updateState = null;          // GET /api/update/status 的结果
+let updateError = "";            // 读取或检查更新失败的原因
+let updateBusy = "";             // 正在进行的操作（check / apply），空表示空闲
+let updatePollTimer = null;
+let updateRestartTimer = null;
+let updateStartupSynced = false;
 
 
 const $ = (id) => document.getElementById(id);
@@ -166,6 +184,7 @@ async function loadConfig() {
   renderConfig();
   loadAllPlanAddresses();
   loadDevice();
+  loadUpdateStatus();
 }
 
 function renderConfig() {
@@ -866,6 +885,7 @@ function pushChannelFields(provider, channel) {
     server: channel.server || "",
     // 0 是合法的最低优先级，不能用 || 回退到默认值
     priority: String(channel.priority ?? "").trim() || pushChannelDefaults.gotify.priority,
+    nickname: channel.nickname || "",
   };
   const field = (name, label, type = "text", attrs = "") => `
     <label>
@@ -963,6 +983,9 @@ function pushChannelFields(provider, channel) {
       field("server", "服务器地址"),
       field("token", "App Token", "password"),
       field("priority", "优先级（0-10，默认 5）", "number", 'min="0" max="10" step="1"'),
+    ],
+    meow: [
+      field("nickname", "昵称（MeoW App 里的推送昵称）"),
     ],
   };
 
@@ -1161,6 +1184,7 @@ function pushChannelFieldNames(provider) {
       "smtp_ssl",
     ],
     gotify: ["server", "token", "priority"],
+    meow: ["nickname"],
   };
   return fields[provider] || [];
 }
@@ -1885,6 +1909,17 @@ function collectConfig() {
     ...(config.captcha || {}),
     max_retries: Number($("captchaMaxRetries").value || 3),
   };
+  const updateCheckEl = $("updateCheckOnStart");
+  const updateGhEl = $("updateGithubMirror");
+  const updateGhcrEl = $("updateGhcrMirror");
+  if (updateCheckEl || updateGhEl || updateGhcrEl) {
+    config.update = {
+      ...(config.update || {}),
+      check_on_start: updateCheckEl ? Boolean(updateCheckEl.checked) : Boolean(config.update?.check_on_start ?? true),
+      github_mirror: updateGhEl ? String(updateGhEl.value || "").trim() : String(config.update?.github_mirror || "").trim(),
+      ghcr_mirror: updateGhcrEl ? String(updateGhcrEl.value || "").trim() : String(config.update?.ghcr_mirror || "").trim(),
+    };
+  }
   config.captcha.channels = Array.from(
     document.querySelectorAll("[data-captcha-provider]"),
   )
@@ -2009,8 +2044,8 @@ function serverConfig({ includeDrafts = true } = {}) {
   for (const channel of pushChannels) {
     if (channel.provider === 'qq' && channel.push_url && typeof channel.push_url === 'string') {
       const url = channel.push_url.trim();
-      if (url && !url.includes('http://')) {
-        throw new Error('QQ 推送的 HTTP API 地址必须包含 "http://"');
+      if (url && !/^https?:\/\//i.test(url)) {
+        throw new Error('QQ 推送的 HTTP API 地址必须以 "http://" 或 "https://" 开头');
       }
     }
   }
@@ -2131,6 +2166,7 @@ async function refreshStatus() {
     }
   }
   lastLoginStatus = login.status || "";
+  observeCheckinForStarPrompt(scheduler);
 }
 
 function isEditingShopConfig() {
@@ -3518,8 +3554,689 @@ function bindDeviceEvents() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 版本检查与自动更新
+// ---------------------------------------------------------------------------
+const UPDATE_MODE_LABELS = {
+  docker: "Docker 容器",
+  git: "Git 源码部署",
+  source: "源码包部署",
+};
+
+function formatIsoTime(isoText) {
+  const text = String(isoText || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function updateTopbarBadge() {
+  const badgeBtn = $("updateBadgeBtn");
+  const badgeText = $("updateBadgeText");
+  const summaryNote = $("updateSummaryNote");
+  const check = updateState?.check;
+  const hasUpdate = Boolean(check?.has_update);
+  if (badgeBtn) {
+    badgeBtn.classList.toggle("is-hidden", !hasUpdate);
+  }
+  if (badgeText && hasUpdate) {
+    const shortSha = check?.remote?.short_commit || "";
+    badgeText.textContent = shortSha ? `新版本 ${shortSha}` : "有新版本";
+  }
+  if (summaryNote) {
+    if (updateState?.status === "restarting") {
+      summaryNote.textContent = "正在重启服务以应用新版本…";
+    } else if (updateState?.running) {
+      summaryNote.textContent = updateState.message || "正在更新…";
+    } else if (hasUpdate && check?.remote?.short_commit) {
+      summaryNote.textContent = `发现新提交 ${check.remote.short_commit}`;
+    } else if (check?.remote?.short_commit) {
+      summaryNote.textContent = `已是最新 (${check.remote.short_commit})`;
+    } else {
+      summaryNote.textContent = "检测 GitHub 最新提交与一键更新";
+    }
+  }
+}
+
+async function loadUpdateStatus() {
+  try {
+    updateState = await api("/api/update/status");
+    updateError = "";
+  } catch (error) {
+    updateError = `更新状态读取失败：${error.message}`;
+  }
+  renderUpdatePanel();
+  updateTopbarBadge();
+  if (updateState?.running) {
+    startUpdatePolling();
+  } else if (updateState?.status === "restarting") {
+    waitForServerRestart();
+  } else if (!updateStartupSynced && updateState && !updateState.check && (config?.update?.check_on_start ?? true)) {
+    // 启动后台自动检测约 2 秒后完成，稍后静默同步一次展示结果
+    updateStartupSynced = true;
+    setTimeout(() => {
+      if (!updateState?.check && !updateBusy) {
+        loadUpdateStatus().catch(() => {});
+      }
+    }, 3500);
+  }
+}
+
+function currentUpdateMirrorDraft() {
+  const ghInput = $("updateGithubMirror");
+  const ghcrInput = $("updateGhcrMirror");
+  return {
+    github_mirror: ghInput ? String(ghInput.value || "").trim() : String(config?.update?.github_mirror || updateState?.config?.github_mirror || "").trim(),
+    ghcr_mirror: ghcrInput ? String(ghcrInput.value || "").trim() : String(config?.update?.ghcr_mirror || updateState?.config?.ghcr_mirror || "").trim(),
+  };
+}
+
+function renderUpdatePanel() {
+  const host = $("updatePanel");
+  if (!host) return;
+  const state = updateState;
+  if (!state) {
+    host.innerHTML = `<p class="task-note">${escapeHtml(updateError || "正在读取版本信息…")}</p>`;
+    return;
+  }
+  const local = state.local || {};
+  const check = state.check || null;
+  const remote = check?.remote || null;
+  const mode = local.mode || "source";
+  const modeLabel = UPDATE_MODE_LABELS[mode] || mode;
+  const isBusy = Boolean(updateBusy || state.running || state.status === "restarting");
+  const disabled = isBusy ? "disabled" : "";
+  const canApply = Boolean(local.can_auto_update) && !local.dirty;
+
+  let modeTag = '<em class="device-tag ok">支持一键更新</em>';
+  if (mode === "docker" && !local.docker_socket_available) {
+    modeTag = '<em class="device-tag warn">未挂载 docker.sock</em>';
+  } else if (local.dirty) {
+    modeTag = '<em class="device-tag warn">存在未提交修改</em>';
+  }
+
+  const localCommit = local.short_commit || "未知";
+  const localTime = formatIsoTime(local.commit_time);
+  const localMeta = [
+    local.branch && mode === "git" ? `分支 ${local.branch}` : "",
+    localTime ? localTime : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  let remoteHtml = '<span class="update-muted">尚未检查，点击下方「检查更新」获取最新提交</span>';
+  if (remote) {
+    const statusTag = check.has_update
+      ? '<em class="device-tag warn">有新版本</em>'
+      : '<em class="device-tag ok">已是最新</em>';
+    const sourceTag = remote.source ? `<em class="device-tag">${escapeHtml(remote.source)}</em>` : "";
+    const remoteTime = formatIsoTime(remote.commit_time);
+    remoteHtml = `
+      <div>
+        <a class="update-link" href="${escapeAttr(remote.url || "#")}" target="_blank" rel="noopener noreferrer"><code>${escapeHtml(remote.short_commit || "-")}</code></a>
+        ${statusTag}
+        ${sourceTag}
+      </div>
+      ${remote.commit_message ? `<div class="update-commit-msg">${escapeHtml(remote.commit_message)}</div>` : ""}
+      ${remoteTime ? `<div class="update-muted">${escapeHtml(remoteTime)}${check.checked_at ? ` · 检测于 ${escapeHtml(check.checked_at)}` : ""}</div>` : ""}
+    `;
+  }
+
+  const newCommits = check?.has_update && Array.isArray(check.new_commits) ? check.new_commits : [];
+  const commitsHtml = newCommits.length
+    ? `
+      <div class="update-commits">
+        <strong>待更新提交（最近 ${newCommits.length} 条）</strong>
+        <ul>
+          ${newCommits
+            .map(
+              (item) => `
+                <li>
+                  <a class="update-link" href="${escapeAttr(item.url || "#")}" target="_blank" rel="noopener noreferrer"><code>${escapeHtml(item.short_sha || "")}</code></a>
+                  <span>${escapeHtml(item.message || "")}</span>
+                </li>
+              `,
+            )
+            .join("")}
+        </ul>
+      </div>
+    `
+    : "";
+
+  let statusHtml = "";
+  const statusMsg = updateError || (state.status && state.status !== "idle" && state.status !== "checked" ? state.message : "");
+  if (statusMsg) {
+    const tone = updateError || state.status === "error"
+      ? "error"
+      : state.status === "restarting" || state.running
+        ? "info"
+        : "ok";
+    statusHtml = `<p class="update-status ${tone}">${escapeHtml(statusMsg)}</p>`;
+  }
+
+  let warningHtml = "";
+  if (mode === "docker" && !local.docker_socket_available) {
+    const cmd = state.manual_command || check?.manual_command || "docker compose pull && docker compose up -d";
+    warningHtml = `
+      <div class="update-command-box">
+        <div class="update-command-head">
+          <span>当前容器无法访问 /var/run/docker.sock（${escapeHtml(local.docker_socket_error || "未挂载或无权限")}），请在宿主机执行：</span>
+          <button class="ghost" type="button" data-update-action="copy-cmd">复制命令</button>
+        </div>
+        <pre id="updateManualCmd">${escapeHtml(cmd)}</pre>
+      </div>
+    `;
+  } else if (local.dirty) {
+    warningHtml = `<p class="task-note">检测到未提交的本地代码修改（${escapeHtml((local.dirty_files || []).slice(0, 4).join("、"))}），自动更新已锁定以防覆盖。</p>`;
+  }
+
+  const cfgUpdate = config?.update || state.config || {};
+  const checkOnStart = Boolean(cfgUpdate.check_on_start ?? true);
+  const ghMirror = String(cfgUpdate.github_mirror || "");
+  const ghcrMirror = String(cfgUpdate.ghcr_mirror || "");
+
+  const applyIdleText =
+    mode === "docker"
+      ? check?.has_update
+        ? "拉取新镜像并重建"
+        : "重新拉取镜像"
+      : check?.has_update
+        ? "拉取新版本并重启"
+        : "重新拉取更新";
+  const applyBtnClass = check?.has_update ? "primary" : "ghost";
+  const applyLabel =
+    state.status === "restarting"
+      ? "重启中…"
+      : updateBusy === "apply" || state.running
+        ? "更新中…"
+        : applyIdleText;
+  const checkLabel = updateBusy === "check" ? "检查中…" : "检查更新";
+
+  host.innerHTML = `
+    <div class="device-facts">
+      <div class="device-fact">
+        <span>部署方式</span>
+        <div>
+          <strong>${escapeHtml(modeLabel)}</strong>
+          ${modeTag}
+        </div>
+      </div>
+      ${
+        mode === "docker" && local.image
+          ? `<div class="device-fact"><span>当前镜像</span><code>${escapeHtml(local.image)}</code></div>`
+          : ""
+      }
+      <div class="device-fact">
+        <span>当前版本</span>
+        <div>
+          <code>${escapeHtml(localCommit)}</code>
+          ${localMeta ? `<span class="update-muted"> · ${escapeHtml(localMeta)}</span>` : ""}
+        </div>
+      </div>
+      <div class="device-fact">
+        <span>最新版本</span>
+        <div>${remoteHtml}</div>
+      </div>
+    </div>
+    ${commitsHtml}
+    ${statusHtml}
+    ${warningHtml}
+    <div class="device-actions">
+      <button class="ghost" type="button" data-update-action="check" ${disabled}>
+        <svg><use href="#i-refresh"></use></svg>
+        <span>${checkLabel}</span>
+      </button>
+      <button
+        class="${applyBtnClass}"
+        type="button"
+        data-update-action="apply"
+        ${disabled || !canApply ? "disabled" : ""}
+      >
+        <svg><use href="#i-download"></use></svg>
+        <span>${applyLabel}</span>
+      </button>
+    </div>
+    <div class="update-settings">
+      <label class="check-row">
+        <input id="updateCheckOnStart" type="checkbox" ${checkOnStart ? "checked" : ""} data-autosave />
+        <span>启动 Web 控制台时自动检查更新</span>
+      </label>
+      <div class="form-grid ${mode === "docker" ? "two" : ""} compact">
+        <label>
+          <span>GitHub 加速前缀（选填）</span>
+          <input
+            id="updateGithubMirror"
+            type="text"
+            value="${escapeAttr(ghMirror)}"
+            placeholder="留空自动回退内置加速源，如 https://gh-proxy.org/"
+            data-autosave
+          />
+        </label>
+        ${
+          mode === "docker"
+            ? `
+          <label>
+            <span>GHCR 镜像加速域名（选填）</span>
+            <input
+              id="updateGhcrMirror"
+              type="text"
+              value="${escapeAttr(ghcrMirror)}"
+              placeholder="留空自动回退 ghcr.nju.edu.cn"
+              data-autosave
+            />
+          </label>
+        `
+            : ""
+        }
+      </div>
+      <p class="task-note">直连 GitHub 或 ghcr.io 失败时会自动尝试国内加速镜像，通常保持留空即可。</p>
+    </div>
+  `;
+}
+
+async function checkForUpdate() {
+  if (updateBusy || updateState?.running) return;
+  updateBusy = "check";
+  updateError = "";
+  renderUpdatePanel();
+  try {
+    const mirrors = currentUpdateMirrorDraft();
+    const data = await api("/api/update/check", {
+      method: "POST",
+      body: JSON.stringify(mirrors),
+    });
+    updateState = data;
+    const remote = data.check?.remote;
+    if (data.check?.has_update) {
+      showToast(`发现新版本 ${remote?.short_commit || ""}（${remote?.source || ""}）`);
+    } else {
+      showToast(`当前已是最新版本（${remote?.short_commit || ""}）`);
+    }
+  } catch (error) {
+    updateError = error.message;
+    showToast(`检查更新失败：${error.message}`);
+  } finally {
+    updateBusy = "";
+    renderUpdatePanel();
+    updateTopbarBadge();
+  }
+}
+
+function confirmUpdateDialog(mode, hasUpdate, remoteSha) {
+  const isDocker = mode === "docker";
+  const title = isDocker ? "拉取最新镜像并重建容器" : "拉取最新版本并重启服务";
+  const desc = isDocker
+    ? `将拉取最新 Docker 镜像（直连失败时自动回退国内加速源），并自动重建当前容器。配置、凭证与日志卷均会保留，期间页面会短暂断开几秒。`
+    : `将拉取 GitHub 最新提交${remoteSha ? `（${remoteSha}）` : ""}，如有依赖变动会自动同步，完成后服务将自动重启并刷新页面。`;
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="updateConfirmTitle">
+        <div class="modal-head">
+          <div>
+            <h2 id="updateConfirmTitle">${escapeHtml(title)}</h2>
+            <p>${escapeHtml(desc)}</p>
+          </div>
+          <button class="ghost icon-only" type="button" data-modal-cancel title="关闭">
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </div>
+        ${!hasUpdate ? '<p class="task-note">当前检测显示已是最新版本，确认仍要重新拉取吗？</p>' : ""}
+        <div class="modal-actions">
+          <button class="ghost" type="button" data-modal-cancel>取消</button>
+          <button class="primary" type="button" data-modal-confirm>
+            <svg><use href="#i-download"></use></svg>
+            <span>确认更新</span>
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.insertBefore(overlay, document.querySelector(".toast"));
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelectorAll("[data-modal-cancel]").forEach((el) => {
+      el.addEventListener("click", () => finish(false));
+    });
+    overlay.querySelector("[data-modal-confirm]")?.addEventListener("click", () => finish(true));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish(false);
+    });
+  });
+}
+
+async function applyUpdate() {
+  if (updateBusy || updateState?.running) return;
+  const mode = updateState?.local?.mode || "source";
+  const hasUpdate = Boolean(updateState?.check?.has_update);
+  const remoteSha = updateState?.check?.remote?.short_commit || "";
+  const ok = await confirmUpdateDialog(mode, hasUpdate, remoteSha);
+  if (!ok) return;
+
+  updateBusy = "apply";
+  updateError = "";
+  renderUpdatePanel();
+  try {
+    const mirrors = currentUpdateMirrorDraft();
+    const data = await api("/api/update/apply", {
+      method: "POST",
+      body: JSON.stringify({ ...mirrors, force: !hasUpdate }),
+    });
+    updateState = data;
+    showToast(mode === "docker" ? "开始拉取最新镜像…" : "开始拉取最新代码…");
+    startUpdatePolling();
+  } catch (error) {
+    updateError = error.message;
+    showToast(`启动更新失败：${error.message}`);
+  } finally {
+    updateBusy = "";
+    renderUpdatePanel();
+    updateTopbarBadge();
+  }
+}
+
+function startUpdatePolling() {
+  if (updatePollTimer) return;
+  updatePollTimer = setInterval(async () => {
+    try {
+      const data = await api("/api/update/status");
+      updateState = data;
+      updateError = "";
+      renderUpdatePanel();
+      updateTopbarBadge();
+      if (data.status === "restarting") {
+        stopUpdatePolling();
+        waitForServerRestart();
+      } else if (!data.running) {
+        stopUpdatePolling();
+        if (data.status === "error") {
+          showToast(`更新失败：${data.message || "未知错误"}`);
+        } else if (data.message) {
+          showToast(data.message);
+        }
+      }
+    } catch {
+      // Docker 重建或本地重启期间连接中断属于正常现象，转入重启等待
+      stopUpdatePolling();
+      waitForServerRestart();
+    }
+  }, 1500);
+}
+
+function stopUpdatePolling() {
+  if (updatePollTimer) {
+    clearInterval(updatePollTimer);
+    updatePollTimer = null;
+  }
+}
+
+function waitForServerRestart() {
+  if (updateRestartTimer) return;
+  showToast("服务正在重启，恢复后将自动刷新页面…");
+  let attempts = 0;
+  const maxAttempts = 60;
+  const probe = async () => {
+    attempts += 1;
+    try {
+      const resp = await fetch("/api/auth/status", { cache: "no-store" });
+      if (resp.ok) {
+        updateRestartTimer = null;
+        showToast("更新完成，正在刷新页面…");
+        if (typeof window !== "undefined" && window.location?.reload) {
+          window.location.reload();
+        }
+        return;
+      }
+    } catch {
+      // 重启中继续等待
+    }
+    if (attempts < maxAttempts) {
+      updateRestartTimer = setTimeout(probe, 1500);
+    } else {
+      updateRestartTimer = null;
+      showToast("等待服务恢复超时，请手动刷新页面查看状态");
+    }
+  };
+  updateRestartTimer = setTimeout(probe, 3000);
+}
+
+function openUpdatePanel() {
+  switchView("dashboard");
+  const panel = document.querySelector('details.panel[data-panel="update"]');
+  if (panel) {
+    panel.open = true;
+    panel.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function copyUpdateManualCommand() {
+  const cmd = updateState?.manual_command || updateState?.check?.manual_command || "";
+  if (!cmd) return;
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    navigator.clipboard
+      .writeText(cmd)
+      .then(() => showToast("已复制更新命令"))
+      .catch(() => showToast("复制失败，请手动选中复制"));
+  } else {
+    showToast("请手动选中上方命令复制");
+  }
+}
+
+function bindUpdateEvents() {
+  const badgeBtn = $("updateBadgeBtn");
+  if (badgeBtn) {
+    badgeBtn.addEventListener("click", () => openUpdatePanel());
+  }
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-update-action]");
+    if (!button || button.disabled) return;
+    const action = button.dataset.updateAction;
+    if (action === "check") checkForUpdate();
+    else if (action === "apply") applyUpdate();
+    else if (action === "copy-cmd") copyUpdateManualCommand();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GitHub Star 引导弹窗
+// ---------------------------------------------------------------------------
+function readStarPromptState() {
+  if (typeof localStorage === "undefined") {
+    return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+  }
+  try {
+    const raw = localStorage.getItem(STAR_PROMPT_KEY);
+    if (!raw) {
+      return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+    }
+    return {
+      hasRunCheckin: Boolean(parsed.hasRunCheckin),
+      shownCount: Number(parsed.shownCount) || 0,
+      lastShownAt: Number(parsed.lastShownAt) || 0,
+      dismissed: Boolean(parsed.dismissed),
+    };
+  } catch {
+    return { hasRunCheckin: false, shownCount: 0, lastShownAt: 0, dismissed: false };
+  }
+}
+
+function writeStarPromptState(state) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(STAR_PROMPT_KEY, JSON.stringify(state));
+  } catch {
+    // 无痕模式或禁用存储时静默忽略
+  }
+}
+
+function canShowStarPromptOnRevisit(now = Date.now()) {
+  if (starPromptShownThisVisit) return false;
+  const state = readStarPromptState();
+  if (state.dismissed) return false;
+  if (!state.hasRunCheckin) return false;
+  if (state.lastShownAt && now - state.lastShownAt < STAR_MIN_REVISIT_GAP_MS) {
+    return false;
+  }
+  return true;
+}
+
+function queueStarPrompt(delayMs, reason = "revisit") {
+  if (starPromptShownThisVisit || starPromptTimer) return;
+  const state = readStarPromptState();
+  if (state.dismissed) return;
+  starPromptTimer = setTimeout(() => {
+    starPromptTimer = null;
+    if (starPromptShownThisVisit) return;
+    const latest = readStarPromptState();
+    if (latest.dismissed) return;
+    if (reason === "revisit" && !canShowStarPromptOnRevisit()) return;
+    if (!showStarPromptModal()) {
+      // 当前有其他弹窗或登录遮罩打开时稍后再试，避免叠层打断用户操作
+      queueStarPrompt(10 * 1000, reason);
+    }
+  }, delayMs);
+}
+
+function observeCheckinForStarPrompt(scheduler) {
+  const running = Boolean(scheduler?.running);
+  const lastRun = String(scheduler?.last_run || "");
+  const lastError = String(scheduler?.last_error || "");
+  const justFinished =
+    starPromptStatusInitialized &&
+    !running &&
+    (lastSchedulerRunning || (Boolean(lastRun) && lastRun !== lastSchedulerRunAt));
+
+  if (!starPromptStatusInitialized) {
+    starPromptStatusInitialized = true;
+    // 若后台早已执行过签到（例如老用户升级后打开管理界面），同样纳入下次进入延迟提醒
+    if (lastRun && !running) {
+      const state = readStarPromptState();
+      if (!state.hasRunCheckin) {
+        writeStarPromptState({ ...state, hasRunCheckin: true });
+      }
+      if (canShowStarPromptOnRevisit()) {
+        queueStarPrompt(STAR_REVISIT_DELAY_MS, "revisit");
+      }
+    }
+  } else if (justFinished && !lastError) {
+    const state = readStarPromptState();
+    if (!state.hasRunCheckin) {
+      writeStarPromptState({ ...state, hasRunCheckin: true });
+    }
+    if (!state.dismissed && !starPromptShownThisVisit && state.shownCount === 0) {
+      queueStarPrompt(STAR_FIRST_CHECKIN_DELAY_MS, "first_checkin");
+    }
+  }
+
+  lastSchedulerRunning = running;
+  lastSchedulerRunAt = lastRun;
+}
+
+function showStarPromptModal(now = Date.now()) {
+  if (document.querySelector(".modal-overlay") || document.getElementById("authOverlay")) {
+    return false;
+  }
+  starPromptShownThisVisit = true;
+  const current = readStarPromptState();
+  writeStarPromptState({
+    ...current,
+    hasRunCheckin: true,
+    shownCount: current.shownCount + 1,
+    lastShownAt: now,
+  });
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "starPromptOverlay";
+  overlay.innerHTML = `
+    <div class="modal-card star-modal-card" role="dialog" aria-modal="true" aria-labelledby="starPromptTitle">
+      <div class="modal-head">
+        <div class="star-modal-hero">
+          <span class="star-modal-icon" aria-hidden="true">
+            <svg><use href="#i-star"></use></svg>
+          </span>
+          <div>
+            <h2 id="starPromptTitle">觉得米游签好用吗？</h2>
+            <p>免费开源项目，欢迎去 GitHub 点一颗 Star 支持一下！</p>
+          </div>
+        </div>
+        <button class="ghost icon-only" type="button" data-star-action="snooze" title="稍后再说">
+          <svg><use href="#i-x"></use></svg>
+        </button>
+      </div>
+      <p class="star-modal-body">
+        如果签到或兑换功能帮到了你，点个 Star 就是对项目持续维护和适配新接口的最大鼓励。
+      </p>
+      <div class="star-modal-actions">
+        <button class="star-modal-dismiss" type="button" data-star-action="dismiss">
+          已 Star，不再提示
+        </button>
+        <div class="star-modal-right">
+          <button class="ghost" type="button" data-star-action="snooze">稍后再说</button>
+          <a
+            class="primary star-modal-cta"
+            href="${GITHUB_REPO_URL}"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-star-action="go"
+          >
+            <svg><use href="#i-star"></use></svg>
+            <span>去 GitHub 点 Star</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertBefore(overlay, document.querySelector(".toast"));
+
+  const closeWith = (mode) => {
+    const latest = readStarPromptState();
+    const ts = Date.now();
+    if (mode === "go" || mode === "dismiss") {
+      writeStarPromptState({ ...latest, lastShownAt: ts, dismissed: true });
+      showToast(mode === "go" ? "感谢支持！欢迎在 GitHub 点亮 Star" : "感谢支持，后续不再提示");
+    } else {
+      writeStarPromptState({ ...latest, lastShownAt: ts, dismissed: false });
+    }
+    overlay.remove();
+  };
+
+  overlay.querySelectorAll("[data-star-action]").forEach((el) => {
+    el.addEventListener("click", () => closeWith(el.dataset.starAction));
+  });
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeWith("snooze");
+  });
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeWith("snooze");
+  });
+  return true;
+}
+
+function scheduleStarPrompt() {
+  if (starPromptTimer) {
+    clearTimeout(starPromptTimer);
+    starPromptTimer = null;
+  }
+  if (canShowStarPromptOnRevisit()) {
+    queueStarPrompt(STAR_REVISIT_DELAY_MS, "revisit");
+  }
+}
+
 function bindEvents() {
   bindDeviceEvents();
+  bindUpdateEvents();
   document.querySelectorAll("summary button, summary input")
       .forEach((control) => {
         control.addEventListener("click", (event) => event.stopPropagation());
@@ -3673,6 +4390,7 @@ function startApp() {
       }
     });
   }, 3000);
+  scheduleStarPrompt();
 }
 
 checkAuthAndInit();

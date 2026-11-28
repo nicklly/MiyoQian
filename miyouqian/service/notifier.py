@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from email.message import EmailMessage
 from typing import Any, Callable, Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 
 from ..core.config import normalize_gotify_priority
 from ..core.onebot import OneBotHTTP
@@ -27,6 +27,7 @@ import httpx
 PUSH_TEMPLATE_DIR = pathlib.Path(__file__).resolve().parents[1] / "templates" / "push"
 # 卡片外层（account_sections_html 的容器）已经是白底，这里不用再重复 background，省字符
 _CARD_STYLE = "border:1px solid #d8e4ef;border-radius:8px;padding:14px"
+MEOW_API_BASE = "https://api.chuckfang.com"
 WECOM_MARKDOWN_MAX_BYTES = 4096
 WECOM_TEXT_MAX_BYTES = 2048
 WECOM_SEND_INTERVAL = 3.1  # 每个机器人最多 20 条/分钟，留出边界余量。
@@ -288,6 +289,10 @@ def _send_exchange(
         send_gotify(client, push, title, build_exchange_markdown(title, goods_name, result, plan, success))
         return
 
+    if provider == "meow":
+        send_meow(client, push, title, build_exchange_text(title, goods_name, result, plan, success))
+        return
+
     raise ValueError(f"不支持的推送通道: {provider}")
 
 
@@ -448,6 +453,10 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
         send_gotify(client, push, title, markdown_message)
         return
 
+    if provider == "meow":
+        send_meow(client, push, title, plain_message)
+        return
+
     raise ValueError(f"不支持的推送通道: {provider}")
 
 
@@ -479,6 +488,32 @@ def send_gotify(client: httpx.Client, push: dict[str, Any], title: str, message:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise ValueError(f"Gotify 请求失败：HTTP {exc.response.status_code}") from None
+
+
+def send_meow(client: httpx.Client, push: dict[str, Any], title: str, message: str) -> None:
+    """发送 MeoW 通知。接收人只由路径里的昵称确定，没有其他凭据。
+
+    和 Server酱一样，业务错误也放在 HTTP 200 的响应体里，必须看 status 字段。
+    """
+    nickname = str(push.get("nickname") or "").strip()
+    require(nickname, "nickname")
+    # 昵称是 URL 路径段，接口不允许包含 /
+    if "/" in nickname:
+        raise ValueError("MeoW 昵称不能包含 /")
+    response = client.post(
+        f"{MEOW_API_BASE}/{quote(nickname, safe='')}",
+        json={"title": title, "msg": message},
+    )
+    response.raise_for_status()
+    try:
+        data = response.json()
+    except ValueError:
+        return
+    if not isinstance(data, dict):
+        return
+    status = data.get("status")
+    if status is not None and str(status) != "200":
+        raise ValueError(f"MeoW 返回错误：{data.get('msg') or status}")
 
 
 def build_push_html(title: str, message: str, success: bool) -> str:
@@ -766,7 +801,7 @@ def build_bbs_section_html(summary: dict[str, Any]) -> str:
         <div style="padding:8px 0;border-top:1px solid #edf3f8;">
           <div style="font-size:13px;margin-bottom:4px;">
             <b style="color:#102033;">{html.escape(task["name"])}</b>
-            <span style="float:right;color:{html.escape(task["color"])};">{html.escape(task["label"])} · {task["done"]}/{task["total"]}</span>
+            <span style="float:right;color:{html.escape(task["color"])};">{html.escape(task_status_text(task))}</span>
           </div>
           {segmented_progress_html(task["done_percent"], task["failed_percent"], "", compact=True)}
         </div>
@@ -784,6 +819,13 @@ def build_bbs_section_html(summary: dict[str, Any]) -> str:
       {task_rows}
     </div>
     """.strip()
+
+
+def task_status_text(task: dict[str, Any]) -> str:
+    """没开启的任务只显示「跳过」，不带 0/0 计数。"""
+    if task["skipped"]:
+        return task["label"]
+    return f"{task['label']} · {task['done']}/{task['total']}"
 
 
 def section_empty_html(title: str, message: str) -> str:
@@ -871,7 +913,10 @@ def build_bbs_section_text(summary: dict[str, Any], markdown: bool = False) -> s
     ]
     for task in bbs["tasks"]:
         bar = segmented_text_bar(task["done_percent"], task["failed_percent"])
-        lines.append(f"- {task['name']} {bar} {task['label']} ({task['done']}/{task['total']})")
+        if task["skipped"]:
+            lines.append(f"- {task['name']} {task['label']}")
+        else:
+            lines.append(f"- {task['name']} {bar} {task['label']} ({task['done']}/{task['total']})")
     if bbs["summary"]:
         lines.append(f"- {bbs['summary']}")
     return "\n".join(lines)
@@ -1094,6 +1139,11 @@ def task_progress(
     fail_keywords: tuple[str, ...],
     captcha_scene: str = "",
 ) -> dict[str, Any]:
+    if any(line.startswith(f"{name}未开启") for line in lines):
+        return {
+            "name": name, "done": 0, "total": 0, "failed": 0, "skipped": True,
+            "done_percent": 0, "failed_percent": 0, "label": "跳过", "color": "#627389",
+        }
     completed_by_skip = any(any(keyword in line for keyword in skip_keywords) for line in lines)
     started = sum(1 for line in lines if start_matcher(line))
     done = count_task_items(success_items, item_keywords)
@@ -1119,6 +1169,7 @@ def task_progress(
         "done": min(done, total),
         "total": total,
         "failed": failed,
+        "skipped": False,
         "done_percent": status["done_percent"],
         "failed_percent": status["failed_percent"],
         "label": status["label"],
